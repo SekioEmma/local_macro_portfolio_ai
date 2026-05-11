@@ -58,6 +58,7 @@ def build_daily_report_json(
     report = {
         "report_type": "daily_portfolio_market_report",
         "generated_at": _utc_now(),
+        "holdings_source": portfolio_snapshot.get("holdings_source", {}),
         "account_summary": {
             "total_assets": portfolio_snapshot.get("total_assets"),
             "invested_assets": portfolio_snapshot.get("invested_assets"),
@@ -107,6 +108,9 @@ def render_daily_report_markdown(report: dict) -> str:
                 ["Invested assets", _format_number(report["account_summary"].get("invested_assets"))],
                 ["Cash", _format_number(report["account_summary"].get("cash"))],
                 ["Total profit/loss", _format_number(report["account_summary"].get("total_profit_loss"))],
+                ["Holdings source mode", _display(report.get("holdings_source", {}).get("mode"))],
+                ["Holdings source path", _display(report.get("holdings_source", {}).get("path"))],
+                ["Holdings source warning", _display(report.get("holdings_source", {}).get("warning"))],
             ],
         ),
         "",
@@ -202,11 +206,12 @@ def _market_item_summary(item: Any, fallback_name: str) -> dict:
         "name": item.get("name") or fallback_name,
         "value": item.get("value"),
         "observation_date": item.get("observation_date"),
-        "source": item.get("source"),
+        "source": _display_source_for_market_item(item),
         "series_id": item.get("series_id"),
         "symbol": item.get("symbol"),
         "status": item.get("status"),
         "error": item.get("error"),
+        "attempted_sources": item.get("attempted_sources", []),
     }
 
 
@@ -242,7 +247,7 @@ def _build_data_limitations(
         ("market_snapshot", market_snapshot),
         ("market_temperature", market_temperature),
     ):
-        if snapshot.get("status") == "error" and snapshot.get("error"):
+        if snapshot.get("status") in {"error", "stale_cache"} and snapshot.get("error"):
             limitations.append(f"{snapshot_name}: {snapshot['error']}")
 
     for section in ("market_data", "macro_data", "fx_data"):
@@ -251,13 +256,16 @@ def _build_data_limitations(
             continue
         for key, item in items.items():
             if isinstance(item, dict) and item.get("status") == "error":
-                limitations.append(
-                    f"{section}.{key} unavailable: {item.get('error')}"
-                )
+                prefix = f"{section}.{key}"
+                if section == "market_data" and key == "nasdaq100":
+                    prefix = "important optional nasdaq100"
+                elif section == "market_data" and key == "gold":
+                    prefix = "optional gold"
+                limitations.append(f"{prefix} unavailable: {item.get('error')}")
 
     for item_key in ("nasdaq100", "gold"):
         item = market_summary.get(item_key, {})
-        if item.get("status") != "ok":
+        if item.get("status") not in {"ok", "stale_cache"} and item.get("error"):
             limitations.append(
                 f"{item_key} unavailable or incomplete: {item.get('error')}"
             )
@@ -361,6 +369,11 @@ def _extract_data_sources(market_snapshot: dict, market_temperature: dict) -> li
 
             for attempt in attempted_sources:
                 if isinstance(attempt, dict):
+                    if item.get("source") != "market_data_service" and _same_source_identity(
+                        item,
+                        attempt,
+                    ):
+                        continue
                     sources.append(_source_record(key, attempt))
 
     input_status = market_temperature.get("input_series_status", {})
@@ -394,6 +407,35 @@ def _source_record(
         "observation_date": item.get("observation_date"),
         "status": item.get("status"),
     }
+
+
+def _display_source_for_market_item(item: dict) -> str | None:
+    source = item.get("source")
+    attempted_sources = [
+        attempt
+        for attempt in item.get("attempted_sources", [])
+        if isinstance(attempt, dict)
+    ]
+    if source != "market_data_service" or not attempted_sources:
+        return source
+
+    source_names = []
+    for attempt in attempted_sources:
+        attempted_source = attempt.get("source")
+        if not attempted_source or attempted_source == "market_data_service":
+            continue
+        if attempted_source not in source_names:
+            source_names.append(attempted_source)
+
+    return "/".join(source_names) if source_names else source
+
+
+def _same_source_identity(left: dict, right: dict) -> bool:
+    return (
+        left.get("source") == right.get("source")
+        and left.get("series_id") == right.get("series_id")
+        and left.get("symbol") == right.get("symbol")
+    )
 
 
 def _copy_keys(source: dict, keys: tuple[str, ...]) -> dict:
@@ -499,7 +541,13 @@ def _bullet_list(items: list[str], empty_text: str = "None recorded.") -> str:
 
 
 def _escape_cell(value: Any) -> str:
-    return _display(value).replace("|", "\\|").replace("\n", " ")
+    text = _display(value)
+    text = text.replace("\r", " ").replace("\n", " ")
+    text = text.replace("|", "\\|")
+    text = text.replace("<", "&lt;").replace(">", "&gt;")
+    if len(text) > 180:
+        text = text[:177].rstrip() + "..."
+    return text
 
 
 def _format_number(value: Any) -> str:
@@ -576,7 +624,7 @@ def _dedupe_limitations(values: list[str]) -> list[str]:
 
 def _limitation_identity(value: str) -> tuple[str, str]:
     prefix, _, error = value.partition(":")
-    key_token = prefix.strip().split()[0] if prefix.strip() else "unknown"
+    key_token = _limitation_key_token(prefix)
     asset_key = key_token.split(".")[-1]
     normalized_error = error.strip().lower() if error else value.strip().lower()
     return asset_key, normalized_error
@@ -584,12 +632,26 @@ def _limitation_identity(value: str) -> tuple[str, str]:
 
 def _limitation_specificity(value: str) -> int:
     prefix = value.partition(":")[0].strip()
-    key_token = prefix.split()[0] if prefix else ""
+    key_token = _limitation_key_token(prefix)
     if key_token.startswith(("market_data.", "macro_data.", "fx_data.")):
         return 3
+    if key_token in {"nasdaq100", "gold"}:
+        return 2
     if "." in key_token:
         return 2
     return 1
+
+
+def _limitation_key_token(prefix: str) -> str:
+    tokens = prefix.strip().split()
+    for token in tokens:
+        if "." in token:
+            return token
+    for token in tokens:
+        normalized = token.strip().lower()
+        if normalized in {"nasdaq100", "gold"}:
+            return normalized
+    return tokens[0] if tokens else "unknown"
 
 
 def _dedupe_sources(sources: list[dict]) -> list[dict]:
@@ -603,8 +665,6 @@ def _dedupe_sources(sources: list[dict]) -> list[dict]:
             source.get("source"),
             source.get("series_id"),
             source.get("symbol"),
-            source.get("observation_date"),
-            source.get("status"),
         )
         if key in seen:
             continue

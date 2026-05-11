@@ -2,7 +2,28 @@ provider_priority:
   primary:
     - fred
   optional_fallback:
+    - manual
     - yfinance
+
+manual_market_data:
+  file: "data/manual/market_data_manual.csv"
+
+required_core_market_keys:
+  - sp500
+  - nasdaq
+  - dgs10
+  - fedfunds
+  - cpi
+  - pce
+  - nonfarm
+  - usd_cny
+
+important_optional_market_keys:
+  - nasdaq100
+
+optional_market_keys:
+  - nasdaq100
+  - gold
 
 market_symbols:
   nasdaq100:
@@ -13,6 +34,7 @@ market_symbols:
     symbol: "GC=F"
     name: "Gold Futures"
     provider: "yfinance"
+    asset_type: "commodity"
   usd_cny:
     symbol: "CNY=X"
     name: "USD/CNY"
@@ -26,6 +48,10 @@ fred_series:
   nasdaq:
     series_id: "NASDAQCOM"
     name: "NASDAQ Composite Index"
+    asset_type: "market_index"
+  nasdaq100:
+    series_id: "NASDAQ100"
+    name: "NASDAQ 100 Index"
     asset_type: "market_index"
   dgs10:
     series_id: "DGS10"
@@ -51,3 +77,10 @@ fred_series:
     series_id: "DEXCHUS"
     name: "Chinese Yuan Renminbi to U.S. Dollar Spot Exchange Rate"
     asset_type: "fx"
+
+retired_sources:
+  gold:
+    fred_series_ids:
+      - "GOLDPMGBD228NLBM"
+      - "GOLDAMGBD228NLBM"
+    notes: "Retired or unavailable FRED gold fixing series; not used by default."

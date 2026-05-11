@@ -43,10 +43,14 @@ def get_fred_series(series_id: str, limit: int = 10) -> dict:
     try:
         response = requests.get(FRED_OBSERVATIONS_URL, params=params, timeout=20)
         if response.status_code != 200:
+            preview = (response.text or "")[:200].strip()
+            error = f"FRED HTTP status {response.status_code}"
+            if preview:
+                error = f"{error}: {preview}"
             return _fred_error(
                 series_id=series_id,
                 limit=limit,
-                error=f"FRED HTTP status {response.status_code}",
+                error=error,
                 timestamp=generated_at,
             )
 

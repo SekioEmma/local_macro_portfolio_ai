@@ -1,0 +1,7 @@
+asset_name,fund_code,asset_class,current_value,cost_basis,profit_loss,currency,updated_at,notes
+摩根标普500指数QDII,017641,sp500,2358.36,2300,58.36,CNY,2026-05-08,
+摩根纳斯达克100指数QDII,019172,nasdaq100,553.63,520,33.63,CNY,2026-05-08,
+广发纳斯达克100ETF联接,270042,nasdaq100,441.09,430,11.09,CNY,2026-05-08,暂停新增
+短债基金,,short_bond,3137.17,3130,7.17,CNY,2026-05-08,
+黄金基金,,gold,1912.33,1900,12.33,CNY,2026-05-08,
+余额宝,,cash,1545.95,1545.95,0,CNY,2026-05-08,

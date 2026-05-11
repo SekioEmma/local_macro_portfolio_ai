@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -10,7 +11,7 @@ from . import fed_provider, fred_provider, yfinance_provider
 MARKET_DATA_KEYS = ("sp500", "nasdaq", "nasdaq100", "gold")
 MACRO_DATA_KEYS = ("dgs10", "fedfunds", "cpi", "pce", "nonfarm")
 FX_DATA_KEYS = ("usd_cny",)
-FRED_PRIMARY_KEYS = (
+REQUIRED_CORE_KEYS = (
     "sp500",
     "nasdaq",
     "dgs10",
@@ -20,6 +21,9 @@ FRED_PRIMARY_KEYS = (
     "nonfarm",
     "usd_cny",
 )
+IMPORTANT_OPTIONAL_KEYS = ("nasdaq100",)
+OPTIONAL_MARKET_KEYS = ("gold",)
+FRED_PRIMARY_KEYS = REQUIRED_CORE_KEYS
 
 
 def load_data_source_config(path: str) -> dict:
@@ -37,6 +41,62 @@ def load_data_source_config(path: str) -> dict:
         raise ValueError(f"Data source config must contain a mapping: {config_path}")
 
     return config
+
+
+def load_manual_market_data(path: str) -> dict:
+    manual_path = _resolve_path(path)
+    if not manual_path.exists():
+        return {}
+
+    rows_by_key: dict[str, dict] = {}
+    try:
+        with manual_path.open("r", encoding="utf-8-sig", newline="") as csv_file:
+            reader = csv.DictReader(csv_file)
+            for row in reader:
+                key = str(row.get("key") or "").strip()
+                if not key:
+                    continue
+
+                raw_value = row.get("value")
+                value = _to_float_or_none(raw_value)
+                status = "ok"
+                error = None
+                if value is None:
+                    status = "error"
+                    error = f"Manual market data value is not numeric: {raw_value}"
+
+                updated_at = str(row.get("updated_at") or "").strip()
+                rows_by_key[key] = {
+                    "key": key,
+                    "name": str(row.get("name") or key).strip(),
+                    "value": value,
+                    "currency": str(row.get("currency") or "").strip() or None,
+                    "source": "manual",
+                    "observation_date": str(row.get("observation_date") or "").strip() or None,
+                    "updated_at": updated_at or None,
+                    "timestamp": updated_at or _utc_now(),
+                    "status": status,
+                    "error": error,
+                    "notes": str(row.get("notes") or "").strip() or None,
+                }
+    except OSError as exc:
+        return {
+            "__file__": {
+                "key": "__file__",
+                "name": str(manual_path),
+                "value": None,
+                "currency": None,
+                "source": "manual",
+                "observation_date": None,
+                "updated_at": None,
+                "timestamp": _utc_now(),
+                "status": "error",
+                "error": f"Manual market data file could not be read: {exc}",
+                "notes": None,
+            }
+        }
+
+    return rows_by_key
 
 
 def get_core_market_snapshot(config_path: str = "configs/data_sources.yaml") -> dict:
@@ -109,8 +169,16 @@ def get_market_item(key: str, config: dict) -> dict:
                 item["symbol"] = result.get("symbol") or candidate.get("symbol")
             if result.get("observation_date"):
                 item["observation_date"] = result["observation_date"]
+            if result.get("currency"):
+                item["currency"] = result["currency"]
+            if result.get("updated_at"):
+                item["updated_at"] = result["updated_at"]
+            if result.get("path"):
+                item["path"] = result["path"]
             if candidate.get("notes"):
                 item["notes"] = candidate["notes"]
+            if result.get("notes"):
+                item["notes"] = result["notes"]
             return item
 
     return _market_error(
@@ -140,8 +208,17 @@ def _provider_candidates(key: str, config: dict) -> list[dict]:
             ),
         ]
 
-    if key in {"nasdaq100", "gold"}:
-        return [_yfinance_candidate(key, config)]
+    if key == "nasdaq100":
+        return [
+            _fred_candidate(key, config),
+            _yfinance_candidate(key, config),
+        ]
+
+    if key == "gold":
+        return [
+            _manual_candidate(key, config),
+            _yfinance_candidate(key, config),
+        ]
 
     return []
 
@@ -178,6 +255,53 @@ def _fred_candidate(key: str, config: dict, notes: str | None = None) -> dict:
     if notes:
         candidate["notes"] = notes
     return candidate
+
+
+def _fred_candidates_with_fallbacks(
+    key: str,
+    config: dict,
+    notes: str | None = None,
+) -> list[dict]:
+    primary = _fred_candidate(key, config, notes=notes)
+    candidates = [primary]
+    if primary.get("provider") != "fred":
+        return candidates
+
+    fred_series = _optional_mapping(config, "fred_series")
+    series_config = fred_series.get(key, {})
+    if not isinstance(series_config, dict):
+        return candidates
+
+    fallback_series_ids = series_config.get("fallback_series_ids", [])
+    if isinstance(fallback_series_ids, str):
+        fallback_series_ids = [fallback_series_ids]
+
+    for fallback_series_id in fallback_series_ids:
+        fallback_series_id = str(fallback_series_id).strip()
+        if not fallback_series_id:
+            continue
+        candidates.append(
+            {
+                "provider": "fred",
+                "series_id": fallback_series_id,
+                "name": series_config.get("name") or key,
+                "asset_type": series_config.get("asset_type"),
+            }
+        )
+
+    return candidates
+
+
+def _manual_candidate(key: str, config: dict) -> dict:
+    manual_config = _optional_mapping(config, "manual_market_data")
+    manual_path = manual_config.get("file") or "data/manual/market_data_manual.csv"
+    return {
+        "provider": "manual",
+        "key": key,
+        "path": str(manual_path),
+        "name": f"{key} manual market data",
+        "asset_type": _asset_type_from_market_symbols(key, config),
+    }
 
 
 def _yfinance_candidate(
@@ -227,6 +351,9 @@ def _call_provider(candidate: dict) -> dict:
     if provider == "yfinance":
         return yfinance_provider.get_latest_price(candidate["symbol"])
 
+    if provider == "manual":
+        return _get_manual_market_item(candidate["key"], candidate["path"])
+
     return {
         "value": None,
         "source": candidate.get("source") or provider,
@@ -250,8 +377,16 @@ def _attempt_summary(candidate: dict, result: dict) -> dict:
         summary["symbol"] = result.get("symbol") or candidate.get("symbol")
     if result.get("observation_date"):
         summary["observation_date"] = result["observation_date"]
+    if result.get("currency"):
+        summary["currency"] = result["currency"]
+    if candidate.get("path") or result.get("path"):
+        summary["path"] = result.get("path") or candidate.get("path")
+    if result.get("updated_at"):
+        summary["updated_at"] = result["updated_at"]
     if candidate.get("notes"):
         summary["notes"] = candidate["notes"]
+    if result.get("notes"):
+        summary["notes"] = result["notes"]
 
     return summary
 
@@ -264,7 +399,7 @@ def _market_error(
     asset_type: str | None = None,
 ) -> dict:
     errors = [
-        f"{attempt.get('source')}: {attempt.get('error')}"
+        f"{_attempt_label(attempt)}: {attempt.get('error')}"
         for attempt in attempts
         if attempt.get("error")
     ]
@@ -281,6 +416,63 @@ def _market_error(
         "error": error,
         "attempted_sources": attempts,
     }
+
+
+def _attempt_label(attempt: dict) -> str:
+    label = str(attempt.get("source") or "unknown")
+    if attempt.get("series_id"):
+        return f"{label} {attempt['series_id']}"
+    if attempt.get("symbol"):
+        return f"{label} {attempt['symbol']}"
+    return label
+
+
+def _get_manual_market_item(key: str, path: str) -> dict:
+    timestamp = _utc_now()
+    manual_path = _resolve_path(path)
+    if not manual_path.exists():
+        return {
+            "key": key,
+            "value": None,
+            "currency": None,
+            "source": "manual",
+            "timestamp": timestamp,
+            "observation_date": None,
+            "updated_at": None,
+            "status": "missing",
+            "error": "manual market data file not found",
+            "path": str(manual_path),
+        }
+
+    manual_data = load_manual_market_data(path)
+    file_error = manual_data.get("__file__")
+    if isinstance(file_error, dict):
+        return {**file_error, "key": key, "path": str(manual_path)}
+
+    item = manual_data.get(key)
+    if not isinstance(item, dict):
+        return {
+            "key": key,
+            "value": None,
+            "currency": None,
+            "source": "manual",
+            "timestamp": timestamp,
+            "observation_date": None,
+            "updated_at": None,
+            "status": "error",
+            "error": f"manual market data key not found: {key}",
+            "path": str(manual_path),
+        }
+
+    return {**item, "path": str(manual_path)}
+
+
+def _asset_type_from_market_symbols(key: str, config: dict) -> str | None:
+    market_symbols = _optional_mapping(config, "market_symbols")
+    symbol_config = market_symbols.get(key)
+    if isinstance(symbol_config, dict) and symbol_config.get("asset_type"):
+        return str(symbol_config["asset_type"])
+    return None
 
 
 def _first_candidate_name(candidates: list[dict], fallback: str) -> str:

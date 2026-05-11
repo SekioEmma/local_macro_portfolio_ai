@@ -1,0 +1,2 @@
+key,name,value,currency,source,observation_date,updated_at,notes
+gold,Gold price manual input,0,USD,manual,YYYY-MM-DD,YYYY-MM-DD,Replace this row with manually entered gold price.
