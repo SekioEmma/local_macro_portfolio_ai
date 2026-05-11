@@ -1,0 +1,44 @@
+user:
+  stage: student
+  monthly_budget_min: 1200
+  monthly_budget_max: 1300
+  platform:
+    - 支付宝基金
+    - 余额宝
+
+target_allocation:
+  sp500: 0.50
+  nasdaq100: 0.20
+  short_bond: 0.20
+  gold: 0.10
+
+known_funds:
+  "017641":
+    name: 摩根标普500指数(QDII)A
+    asset_class: sp500
+  "019172":
+    name: 摩根纳斯达克100指数(QDII)A
+    asset_class: nasdaq100
+  "270042":
+    name: 广发纳斯达克100ETF联接(QDII)A
+    asset_class: nasdaq100
+
+build_phase:
+  daily_plan:
+    "017641": 50
+    "019172": 20
+    "270042": 0
+    short_bond: 0
+    gold: 0
+
+rebalance:
+  deviation_threshold: 0.05
+  year_end_review: true
+  prefer_new_cash: true
+  avoid_frequent_selling: true
+
+constraints:
+  no_leverage: true
+  avoid_frequent_trading: true
+  no_short_term_prediction: true
+  no_auto_trading: true
