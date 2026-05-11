@@ -1,0 +1,53 @@
+provider_priority:
+  primary:
+    - fred
+  optional_fallback:
+    - yfinance
+
+market_symbols:
+  nasdaq100:
+    symbol: "^NDX"
+    name: "NASDAQ 100 Index"
+    provider: "yfinance"
+  gold:
+    symbol: "GC=F"
+    name: "Gold Futures"
+    provider: "yfinance"
+  usd_cny:
+    symbol: "CNY=X"
+    name: "USD/CNY"
+    provider: "yfinance"
+
+fred_series:
+  sp500:
+    series_id: "SP500"
+    name: "S&P 500 Index"
+    asset_type: "market_index"
+  nasdaq:
+    series_id: "NASDAQCOM"
+    name: "NASDAQ Composite Index"
+    asset_type: "market_index"
+  dgs10:
+    series_id: "DGS10"
+    name: "10-Year Treasury Constant Maturity Rate"
+    asset_type: "interest_rate"
+  fedfunds:
+    series_id: "FEDFUNDS"
+    name: "Federal Funds Effective Rate"
+    asset_type: "policy_rate"
+  cpi:
+    series_id: "CPIAUCSL"
+    name: "Consumer Price Index for All Urban Consumers"
+    asset_type: "inflation"
+  pce:
+    series_id: "PCEPI"
+    name: "Personal Consumption Expenditures Price Index"
+    asset_type: "inflation"
+  nonfarm:
+    series_id: "PAYEMS"
+    name: "All Employees, Total Nonfarm"
+    asset_type: "labor_market"
+  usd_cny:
+    series_id: "DEXCHUS"
+    name: "Chinese Yuan Renminbi to U.S. Dollar Spot Exchange Rate"
+    asset_type: "fx"
