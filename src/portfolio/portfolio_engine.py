@@ -1,0 +1,366 @@
+from __future__ import annotations
+
+import csv
+from pathlib import Path
+from typing import Any
+
+
+REQUIRED_HOLDING_FIELDS = (
+    "asset_name",
+    "fund_code",
+    "asset_class",
+    "current_value",
+    "cost_basis",
+    "profit_loss",
+    "currency",
+    "updated_at",
+    "notes",
+)
+
+MONEY_FIELDS = ("current_value", "cost_basis", "profit_loss")
+
+
+def load_holdings_csv(path: str) -> list[dict]:
+    csv_path = Path(path)
+
+    with csv_path.open("r", encoding="utf-8-sig", newline="") as file:
+        reader = csv.DictReader(file)
+        if reader.fieldnames is None:
+            raise ValueError(f"Holdings CSV has no header: {csv_path}")
+
+        missing_fields = [
+            field for field in REQUIRED_HOLDING_FIELDS if field not in reader.fieldnames
+        ]
+        if missing_fields:
+            missing = ", ".join(missing_fields)
+            raise ValueError(f"Holdings CSV is missing required field(s): {missing}")
+
+        holdings: list[dict] = []
+        for row_number, row in enumerate(reader, start=2):
+            normalized = {
+                field: (row.get(field) or "").strip() for field in REQUIRED_HOLDING_FIELDS
+            }
+
+            if not normalized["asset_class"]:
+                raise ValueError(
+                    f"Holdings CSV row {row_number} is missing asset_class."
+                )
+
+            for field in MONEY_FIELDS:
+                raw_value = normalized[field]
+                try:
+                    normalized[field] = float(raw_value)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"Holdings CSV row {row_number} has invalid {field}: "
+                        f"{raw_value!r}."
+                    ) from exc
+
+            holdings.append(normalized)
+
+    return holdings
+
+
+def load_user_profile(path: str) -> dict:
+    profile_path = Path(path)
+    raw_text = profile_path.read_text(encoding="utf-8")
+
+    try:
+        import yaml
+    except ImportError:
+        profile = _load_simple_yaml(raw_text)
+    else:
+        profile = yaml.safe_load(raw_text)
+
+    if not isinstance(profile, dict):
+        raise ValueError(f"User profile YAML must contain a mapping: {profile_path}")
+
+    return profile
+
+
+def aggregate_by_asset_class(holdings: list[dict]) -> dict:
+    aggregated: dict[str, dict[str, float]] = {}
+
+    for index, holding in enumerate(holdings, start=1):
+        asset_class = str(holding.get("asset_class", "")).strip()
+        if not asset_class:
+            raise ValueError(f"Holding #{index} is missing asset_class.")
+
+        bucket = aggregated.setdefault(
+            asset_class,
+            {
+                "current_value": 0.0,
+                "cost_basis": 0.0,
+                "profit_loss": 0.0,
+            },
+        )
+        for field in MONEY_FIELDS:
+            bucket[field] += float(holding[field])
+
+    return {
+        asset_class: {
+            field: _round_money(value) for field, value in values.items()
+        }
+        for asset_class, values in aggregated.items()
+    }
+
+
+def calculate_total_assets(aggregated: dict) -> dict:
+    total_assets = sum(
+        float(values.get("current_value", 0.0)) for values in aggregated.values()
+    )
+    cash = float(aggregated.get("cash", {}).get("current_value", 0.0))
+    total_profit_loss = sum(
+        float(values.get("profit_loss", 0.0)) for values in aggregated.values()
+    )
+
+    return {
+        "total_assets": _round_money(total_assets),
+        "invested_assets": _round_money(total_assets - cash),
+        "cash": _round_money(cash),
+        "total_profit_loss": _round_money(total_profit_loss),
+    }
+
+
+def calculate_weights(aggregated: dict, include_cash: bool = False) -> dict:
+    eligible_assets = {
+        asset_class: values
+        for asset_class, values in aggregated.items()
+        if include_cash or asset_class != "cash"
+    }
+    denominator = sum(
+        float(values.get("current_value", 0.0)) for values in eligible_assets.values()
+    )
+
+    if denominator == 0:
+        return {
+            asset_class: _round_weight(0.0)
+            for asset_class in eligible_assets
+        }
+
+    return {
+        asset_class: _round_weight(
+            float(values.get("current_value", 0.0)) / denominator
+        )
+        for asset_class, values in eligible_assets.items()
+    }
+
+
+def calculate_deviation(current_weights: dict, target_allocation: dict) -> dict:
+    ordered_asset_classes = list(target_allocation)
+    ordered_asset_classes.extend(
+        asset_class
+        for asset_class in current_weights
+        if asset_class not in target_allocation
+    )
+
+    return {
+        asset_class: _round_weight(
+            float(current_weights.get(asset_class, 0.0))
+            - float(target_allocation.get(asset_class, 0.0))
+        )
+        for asset_class in ordered_asset_classes
+    }
+
+
+def classify_deviation(deviation: dict, threshold: float) -> dict:
+    return {
+        asset_class: _classify_single_deviation(float(value), threshold)
+        for asset_class, value in deviation.items()
+    }
+
+
+def check_dca_budget(
+    daily_plan: dict,
+    trading_days: int,
+    monthly_budget_min: float,
+    monthly_budget_max: float,
+) -> dict:
+    if trading_days < 0:
+        raise ValueError("trading_days must be greater than or equal to 0.")
+
+    daily_total = 0.0
+    for key, value in daily_plan.items():
+        amount = _to_float(value, f"daily_plan.{key}")
+        if amount < 0:
+            raise ValueError(f"daily_plan.{key} must be greater than or equal to 0.")
+        daily_total += amount
+
+    monthly_required = daily_total * trading_days
+    budget_min = float(monthly_budget_min)
+    budget_max = float(monthly_budget_max)
+
+    if monthly_required > budget_max:
+        status = "above_budget"
+    elif monthly_required < budget_min:
+        status = "below_budget"
+    else:
+        status = "within_budget"
+
+    return {
+        "daily_total": _round_money(daily_total),
+        "monthly_required": _round_money(monthly_required),
+        "budget_min": _round_money(budget_min),
+        "budget_max": _round_money(budget_max),
+        "trading_days": trading_days,
+        "status": status,
+    }
+
+
+def generate_portfolio_snapshot(
+    holdings_path: str,
+    profile_path: str,
+    trading_days: int = 21,
+) -> dict:
+    holdings = load_holdings_csv(holdings_path)
+    profile = load_user_profile(profile_path)
+
+    target_allocation = _require_mapping(profile, "target_allocation")
+    user = _require_mapping(profile, "user")
+    build_phase = _require_mapping(profile, "build_phase")
+    rebalance = _require_mapping(profile, "rebalance")
+    daily_plan = _require_mapping(build_phase, "daily_plan")
+
+    aggregated = aggregate_by_asset_class(holdings)
+    totals = calculate_total_assets(aggregated)
+    weights_ex_cash = calculate_weights(aggregated, include_cash=False)
+    rounded_target_allocation = {
+        asset_class: _round_weight(float(weight))
+        for asset_class, weight in target_allocation.items()
+    }
+    deviation = calculate_deviation(weights_ex_cash, rounded_target_allocation)
+    threshold = float(rebalance.get("deviation_threshold", 0.0))
+    deviation_flags = classify_deviation(deviation, threshold)
+    dca_budget_check = check_dca_budget(
+        daily_plan=daily_plan,
+        trading_days=trading_days,
+        monthly_budget_min=float(user["monthly_budget_min"]),
+        monthly_budget_max=float(user["monthly_budget_max"]),
+    )
+
+    return {
+        "total_assets": totals["total_assets"],
+        "invested_assets": totals["invested_assets"],
+        "cash": totals["cash"],
+        "total_profit_loss": totals["total_profit_loss"],
+        "aggregated_by_asset_class": aggregated,
+        "weights_ex_cash": weights_ex_cash,
+        "target_allocation": rounded_target_allocation,
+        "deviation": deviation,
+        "deviation_flags": deviation_flags,
+        "dca_budget_check": dca_budget_check,
+        "notes": [
+            "This snapshot is descriptive only and does not include investment advice.",
+            "Cash is excluded from target-allocation weights by default.",
+            "Deviation is calculated as current weight minus target weight.",
+        ],
+    }
+
+
+def _classify_single_deviation(value: float, threshold: float) -> str:
+    if value <= -threshold:
+        return "underweight"
+    if value >= threshold:
+        return "overweight"
+    return "within_range"
+
+
+def _require_mapping(source: dict, key: str) -> dict:
+    value = source.get(key)
+    if not isinstance(value, dict):
+        raise ValueError(f"user_profile.yaml must contain mapping: {key}")
+    return value
+
+
+def _round_money(value: float) -> float:
+    return round(float(value), 2)
+
+
+def _round_weight(value: float) -> float:
+    return round(float(value), 4)
+
+
+def _to_float(value: Any, field_name: str) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be numeric: {value!r}") from exc
+
+
+def _load_simple_yaml(raw_text: str) -> dict:
+    lines = raw_text.splitlines()
+    root: dict[str, Any] = {}
+    stack: list[tuple[int, Any]] = [(-1, root)]
+
+    for index, line in enumerate(lines):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+
+        indent = len(line) - len(line.lstrip(" "))
+        content = line.strip()
+
+        while stack and indent <= stack[-1][0]:
+            stack.pop()
+
+        parent = stack[-1][1]
+        if content.startswith("- "):
+            if not isinstance(parent, list):
+                raise ValueError(f"Unsupported YAML list item on line {index + 1}.")
+            parent.append(_parse_simple_yaml_scalar(content[2:].strip()))
+            continue
+
+        if ":" not in content:
+            raise ValueError(f"Unsupported YAML syntax on line {index + 1}.")
+
+        key, value = content.split(":", 1)
+        key = _parse_simple_yaml_key(key.strip())
+        value = value.strip()
+
+        if value:
+            parent[key] = _parse_simple_yaml_scalar(value)
+            continue
+
+        child = [] if _next_content_is_list(lines, index, indent) else {}
+        parent[key] = child
+        stack.append((indent, child))
+
+    return root
+
+
+def _next_content_is_list(lines: list[str], current_index: int, current_indent: int) -> bool:
+    for line in lines[current_index + 1 :]:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        return indent > current_indent and line.strip().startswith("- ")
+    return False
+
+
+def _parse_simple_yaml_key(value: str) -> str:
+    if (value.startswith('"') and value.endswith('"')) or (
+        value.startswith("'") and value.endswith("'")
+    ):
+        return value[1:-1]
+    return value
+
+
+def _parse_simple_yaml_scalar(value: str) -> Any:
+    if (value.startswith('"') and value.endswith('"')) or (
+        value.startswith("'") and value.endswith("'")
+    ):
+        return value[1:-1]
+
+    lower_value = value.lower()
+    if lower_value == "true":
+        return True
+    if lower_value == "false":
+        return False
+    if lower_value in {"null", "none", "~"}:
+        return None
+
+    try:
+        if "." in value:
+            return float(value)
+        return int(value)
+    except ValueError:
+        return value
