@@ -22,7 +22,6 @@ important_optional_market_keys:
   - nasdaq100
 
 optional_market_keys:
-  - nasdaq100
   - gold
 
 market_symbols:
@@ -84,3 +83,55 @@ retired_sources:
       - "GOLDPMGBD228NLBM"
       - "GOLDAMGBD228NLBM"
     notes: "Retired or unavailable FRED gold fixing series; not used by default."
+
+data_quality:
+  sp500:
+    expected_frequency: "daily"
+    max_stale_days: 5
+    source_tier: "official_api"
+    importance: "required_core"
+  nasdaq:
+    expected_frequency: "daily"
+    max_stale_days: 5
+    source_tier: "official_api"
+    importance: "required_core"
+  nasdaq100:
+    expected_frequency: "daily"
+    max_stale_days: 5
+    source_tier: "official_api"
+    importance: "important_optional"
+  dgs10:
+    expected_frequency: "daily"
+    max_stale_days: 5
+    source_tier: "official_api"
+    importance: "required_core"
+  fedfunds:
+    expected_frequency: "monthly"
+    max_stale_days: 45
+    source_tier: "official_api"
+    importance: "required_core"
+  cpi:
+    expected_frequency: "monthly"
+    max_stale_days: 45
+    source_tier: "official_api"
+    importance: "required_core"
+  pce:
+    expected_frequency: "monthly"
+    max_stale_days: 45
+    source_tier: "official_api"
+    importance: "required_core"
+  nonfarm:
+    expected_frequency: "monthly"
+    max_stale_days: 45
+    source_tier: "official_api"
+    importance: "required_core"
+  usd_cny:
+    expected_frequency: "daily"
+    max_stale_days: 10
+    source_tier: "official_api"
+    importance: "required_core"
+  gold:
+    expected_frequency: "manual"
+    max_stale_days: 30
+    source_tier: "manual_or_unofficial_fallback"
+    importance: "optional"

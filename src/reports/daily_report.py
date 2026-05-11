@@ -198,6 +198,7 @@ def _market_item_summary(item: Any, fallback_name: str) -> dict:
             "source": None,
             "series_id": None,
             "symbol": None,
+            "data_quality": {},
             "status": "error",
             "error": "Market data item missing.",
         }
@@ -212,6 +213,7 @@ def _market_item_summary(item: Any, fallback_name: str) -> dict:
         "status": item.get("status"),
         "error": item.get("error"),
         "attempted_sources": item.get("attempted_sources", []),
+        "data_quality": item.get("data_quality", {}),
     }
 
 
@@ -250,11 +252,20 @@ def _build_data_limitations(
         if snapshot.get("status") in {"error", "stale_cache"} and snapshot.get("error"):
             limitations.append(f"{snapshot_name}: {snapshot['error']}")
 
+    if market_snapshot.get("status") == "stale_cache" or market_snapshot.get(
+        "diagnostics", {}
+    ).get("used_cache"):
+        limitations.append(
+            "cache used: market_snapshot includes stale cache because required core live fetch failed."
+        )
+
     for section in ("market_data", "macro_data", "fx_data"):
         items = market_snapshot.get(section, {})
         if not isinstance(items, dict):
             continue
         for key, item in items.items():
+            if not isinstance(item, dict):
+                continue
             if isinstance(item, dict) and item.get("status") == "error":
                 prefix = f"{section}.{key}"
                 if section == "market_data" and key == "nasdaq100":
@@ -262,6 +273,31 @@ def _build_data_limitations(
                 elif section == "market_data" and key == "gold":
                     prefix = "optional gold"
                 limitations.append(f"{prefix} unavailable: {item.get('error')}")
+
+            data_quality = item.get("data_quality", {})
+            if (
+                isinstance(data_quality, dict)
+                and data_quality.get("importance") == "required_core"
+                and data_quality.get("freshness_status") == "stale"
+            ):
+                limitations.append(
+                    f"required_core stale: {key} observation_date={data_quality.get('observation_date')}"
+                )
+
+            if (
+                isinstance(data_quality, dict)
+                and data_quality.get("freshness_status") == "extended_monthly_lag"
+            ):
+                limitations.append(
+                    "informational monthly lag: "
+                    f"{key} observation_date={data_quality.get('observation_date')} "
+                    f"month_gap={data_quality.get('month_gap')}"
+                )
+
+            if key == "gold" and _manual_missing(item) and not _gold_unavailable_mentions_manual_missing(
+                limitations
+            ):
+                limitations.append("manual gold missing: manual market data file not found.")
 
     for item_key in ("nasdaq100", "gold"):
         item = market_summary.get(item_key, {})
@@ -430,6 +466,29 @@ def _display_source_for_market_item(item: dict) -> str | None:
     return "/".join(source_names) if source_names else source
 
 
+def _manual_missing(item: dict) -> bool:
+    attempts = item.get("attempted_sources", [])
+    if not isinstance(attempts, list):
+        return False
+    for attempt in attempts:
+        if not isinstance(attempt, dict):
+            continue
+        if attempt.get("source") == "manual" and attempt.get("status") == "missing":
+            return True
+    return False
+
+
+def _gold_unavailable_mentions_manual_missing(limitations: list[str]) -> bool:
+    for limitation in limitations:
+        normalized = limitation.lower()
+        if (
+            "optional gold unavailable" in normalized
+            and "manual market data file not found" in normalized
+        ):
+            return True
+    return False
+
+
 def _same_source_identity(left: dict, right: dict) -> bool:
     return (
         left.get("source") == right.get("source")
@@ -479,13 +538,25 @@ def _market_table(market_summary: dict) -> str:
                 _format_number(item.get("value")),
                 _display(item.get("observation_date")),
                 _display(item.get("source")),
+                _display(item.get("data_quality", {}).get("source_tier")),
+                _display(item.get("data_quality", {}).get("freshness_status")),
                 _display(item.get("status")),
                 _display(item.get("error")),
             ]
         )
 
     return _markdown_table(
-        ["Key", "Name", "Value", "Observation date", "Source", "Status", "Error"],
+        [
+            "Key",
+            "Name",
+            "Value",
+            "Observation date",
+            "Source",
+            "Source tier",
+            "Freshness",
+            "Status",
+            "Error",
+        ],
         rows,
     )
 

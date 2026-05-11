@@ -15,8 +15,10 @@ from data_providers.market_data_service import (
     OPTIONAL_MARKET_KEYS,
     REQUIRED_CORE_KEYS,
     get_core_market_snapshot,
+    load_data_source_config,
 )
 from data_providers.cache import load_json_cache, save_json_cache
+from data_quality.freshness import calculate_freshness
 
 
 DEFAULT_OUTPUT_PATH = PROJECT_ROOT / "outputs" / "reports" / "market_snapshot.json"
@@ -63,6 +65,8 @@ def main() -> None:
         else:
             snapshot["status"] = "ok"
             snapshot["error"] = None
+
+    _attach_data_quality(snapshot)
 
     formatted_json = json.dumps(snapshot, ensure_ascii=False, indent=2)
     print(formatted_json)
@@ -236,6 +240,24 @@ def _status_by_keys(snapshot: dict, keys: tuple[str, ...]) -> dict:
             "error": item.get("error"),
         }
     return statuses
+
+
+def _attach_data_quality(snapshot: dict) -> None:
+    config = load_data_source_config("configs/data_sources.yaml")
+    data_quality_config = config.get("data_quality", {})
+    if not isinstance(data_quality_config, dict):
+        data_quality_config = {}
+
+    generated_at = str(snapshot.get("generated_at") or "")
+    for section in ("market_data", "macro_data", "fx_data"):
+        section_data = snapshot.get(section)
+        if not isinstance(section_data, dict):
+            continue
+        for key, item in section_data.items():
+            if not isinstance(item, dict):
+                continue
+            metadata = data_quality_config.get(key, {})
+            item["data_quality"] = calculate_freshness(item, metadata, generated_at)
 
 
 if __name__ == "__main__":
