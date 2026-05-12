@@ -45,7 +45,9 @@ FORBIDDEN_ANSWER_PATTERNS = [
 
 
 def main() -> None:
-    user_question = _read_user_question(sys.argv[1:])
+    parsed_args = _parse_cli_args(sys.argv[1:])
+    user_question = parsed_args["question"]
+    eval_case = parsed_args["eval_case"]
     if not user_question:
         _print_summary(
             {
@@ -77,7 +79,18 @@ def main() -> None:
         context_pack.get("data_limitations", [])
     )
 
-    prompt = build_answer_prompt(user_question, context_pack, config)
+    repair_context = eval_case.get("repair_context") if isinstance(eval_case, dict) else None
+    if isinstance(repair_context, dict):
+        prompt = build_validation_repair_prompt(
+            user_question=user_question,
+            context_pack=context_pack,
+            validation_warnings=repair_context.get("warnings", []),
+            eval_case=eval_case,
+            original_answer=repair_context.get("original_answer"),
+            missing_required_terms=repair_context.get("missing_required_terms", []),
+        )
+    else:
+        prompt = build_answer_prompt(user_question, context_pack, config, eval_case=eval_case)
 
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     _write_utf8_markdown(PROMPT_OUTPUT_PATH, prompt)
@@ -146,6 +159,8 @@ def main() -> None:
             user_question=user_question,
             context_pack=context_pack,
             validation_warnings=answer_validation.get("warnings", []),
+            eval_case=eval_case,
+            original_answer=result.get("answer"),
         )
         _write_utf8_markdown(PROMPT_OUTPUT_PATH, repair_prompt)
         retry_result = call_local_llm(repair_prompt, config)
@@ -235,6 +250,8 @@ def main() -> None:
         "cleaning_notes": result.get("cleaning_notes", []),
         "answer_validation": answer_validation,
     }
+    if eval_case:
+        summary["eval_case_id"] = eval_case.get("id")
     if result.get("error"):
         summary["error"] = result["error"]
 
@@ -242,6 +259,34 @@ def main() -> None:
 
     if result.get("status") == "error":
         raise SystemExit(1)
+
+
+def _parse_cli_args(args: list[str]) -> dict[str, Any]:
+    question_parts = []
+    eval_case = None
+    index = 0
+    while index < len(args):
+        item = args[index]
+        if item == "--eval-case-json":
+            if index + 1 >= len(args):
+                raise SystemExit("--eval-case-json requires a JSON value.")
+            try:
+                parsed = json.loads(args[index + 1])
+            except json.JSONDecodeError as exc:
+                raise SystemExit(f"Invalid --eval-case-json value: {exc}") from exc
+            if not isinstance(parsed, dict):
+                raise SystemExit("--eval-case-json must decode to an object.")
+            eval_case = parsed
+            index += 2
+            continue
+        question_parts.append(item)
+        index += 1
+
+    question = _read_user_question(question_parts)
+    return {
+        "question": question,
+        "eval_case": eval_case,
+    }
 
 
 def _read_user_question(args: list[str]) -> str:

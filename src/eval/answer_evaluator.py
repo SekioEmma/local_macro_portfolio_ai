@@ -1,0 +1,209 @@
+from __future__ import annotations
+
+import json
+import re
+from pathlib import Path
+from typing import Any
+
+try:
+    import yaml
+except ModuleNotFoundError:
+    yaml = None
+
+
+THINKING_PATTERNS = [
+    "Thinking Process",
+    "Thinking...",
+    "done thinking",
+]
+TRADE_COMMAND_PATTERNS = [
+    r"买入\s*\d+",
+    r"卖出\s*\d+",
+    r"满仓",
+    r"清仓",
+    r"立即买入",
+    r"立即卖出",
+]
+
+
+def load_eval_cases(path: str) -> dict[str, Any]:
+    eval_path = Path(path)
+    if not eval_path.exists():
+        return {
+            "status": "error",
+            "cases": [],
+            "error": f"File not found: {eval_path}",
+        }
+
+    try:
+        raw_text = eval_path.read_text(encoding="utf-8-sig")
+        data = _load_structured_text(raw_text)
+    except (OSError, ValueError) as exc:
+        return {
+            "status": "error",
+            "cases": [],
+            "error": str(exc),
+        }
+
+    if not isinstance(data, dict):
+        return {
+            "status": "error",
+            "cases": [],
+            "error": "Evaluation config root must be an object.",
+        }
+    cases = data.get("cases", [])
+    if not isinstance(cases, list):
+        return {
+            "status": "error",
+            "cases": [],
+            "error": "Evaluation config cases must be a list.",
+        }
+
+    return {
+        "status": "ok",
+        "cases": cases,
+        "error": None,
+    }
+
+
+def evaluate_answer(answer: str, case: dict[str, Any]) -> dict[str, Any]:
+    case_id = case.get("id", "unknown")
+    answer_text = answer or ""
+    required_checks = []
+    forbidden_hits = []
+    warnings = []
+
+    if not answer_text.strip():
+        warnings.append("Answer is empty.")
+    elif len(answer_text.strip()) < 40:
+        warnings.append("Answer is very short.")
+
+    for group in case.get("required_terms_any", []):
+        if not isinstance(group, list):
+            group = [str(group)]
+        matched = [term for term in group if _contains_term(answer_text, term)]
+        required_checks.append(
+            {
+                "terms_any": group,
+                "status": "pass" if matched else "fail",
+                "matched_terms": matched,
+                "missing": [] if matched else group,
+            }
+        )
+
+    for term in case.get("forbidden_terms", []):
+        if _has_forbidden_term(answer_text, str(term)):
+            forbidden_hits.append(str(term))
+
+    for pattern in THINKING_PATTERNS:
+        if pattern in answer_text:
+            forbidden_hits.append(pattern)
+
+    for pattern in TRADE_COMMAND_PATTERNS:
+        if re.search(pattern, answer_text, flags=re.IGNORECASE):
+            forbidden_hits.append(pattern)
+
+    missing_required = [
+        check for check in required_checks if check["status"] == "fail"
+    ]
+
+    if forbidden_hits or missing_required or not answer_text.strip():
+        status = "fail"
+    elif warnings:
+        status = "warning"
+    else:
+        status = "pass"
+
+    score = _score_result(
+        total_required=len(required_checks),
+        missing_required=len(missing_required),
+        forbidden_count=len(forbidden_hits),
+        warning_count=len(warnings),
+    )
+
+    return {
+        "case_id": case_id,
+        "status": status,
+        "required_checks": required_checks,
+        "forbidden_hits": _dedupe_strings(forbidden_hits),
+        "warnings": warnings,
+        "score": score,
+    }
+
+
+def summarize_eval_results(results: list[dict[str, Any]]) -> dict[str, Any]:
+    total = len(results)
+    passed = sum(1 for result in results if result.get("status") == "pass")
+    failed = sum(1 for result in results if result.get("status") == "fail")
+    warnings = sum(1 for result in results if result.get("status") == "warning")
+    pass_rate = round(passed / total, 4) if total else 0
+    failed_case_ids = [
+        result.get("case_id")
+        for result in results
+        if result.get("status") == "fail"
+    ]
+
+    return {
+        "total": total,
+        "passed": passed,
+        "failed": failed,
+        "warnings": warnings,
+        "pass_rate": pass_rate,
+        "failed_case_ids": failed_case_ids,
+    }
+
+
+def _load_structured_text(raw_text: str) -> Any:
+    try:
+        return json.loads(raw_text)
+    except json.JSONDecodeError:
+        pass
+
+    if yaml is not None:
+        return yaml.safe_load(raw_text)
+
+    raise ValueError("Could not parse eval config as JSON, and PyYAML is not installed.")
+
+
+def _contains_term(answer: str, term: str) -> bool:
+    if not term:
+        return False
+    return term.lower() in answer.lower()
+
+
+def _has_forbidden_term(answer: str, term: str) -> bool:
+    if not term:
+        return False
+    if term == "保证":
+        for match in re.finditer(re.escape(term), answer):
+            prefix = answer[max(0, match.start() - 3) : match.start()]
+            if any(negation in prefix for negation in ("不", "不能", "无法", "不可", "不要")):
+                continue
+            return True
+        return False
+    return term.lower() in answer.lower()
+
+
+def _score_result(
+    total_required: int,
+    missing_required: int,
+    forbidden_count: int,
+    warning_count: int,
+) -> int:
+    score = 100
+    if total_required:
+        score -= int((missing_required / total_required) * 60)
+    score -= min(30, forbidden_count * 15)
+    score -= min(10, warning_count * 5)
+    return max(0, score)
+
+
+def _dedupe_strings(items: list[str]) -> list[str]:
+    result = []
+    seen = set()
+    for item in items:
+        if item in seen:
+            continue
+        seen.add(item)
+        result.append(item)
+    return result

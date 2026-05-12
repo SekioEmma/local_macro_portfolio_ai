@@ -284,6 +284,49 @@
 - 不允许模型绕过 context pack 编造数据
 - 不在 answer 文件中保存 Thinking Process / chain-of-thought
 
+### 阶段 5.2：本地模型回答质量评估集
+
+已完成：
+- configs/eval_questions.yaml
+- src/eval/answer_evaluator.py
+- scripts/run_llm_eval.py
+- outputs/eval/.gitkeep
+
+能力：
+- 固定评估问题集
+- 批量调用本地 ask_local_ai.py / Ollama 回答流程
+- 每个 case 生成 answer 与 eval json
+- 生成 outputs/eval/YYYY-MM-DD/eval_summary.json
+- 生成 outputs/eval/YYYY-MM-DD/eval_report.md
+- 规则化检查 required_terms_any
+- 规则化检查 forbidden_terms
+- 检查 Thinking Process / Thinking... / done thinking
+- 检查明显交易命令模式
+- 汇总 pass / fail / warning / pass_rate
+
+评估覆盖：
+- sample_fallback 必须说明不是真实账户
+- historical outcome is not forecast
+- 禁止具体交易指令
+- 必须引用组合事实
+- 必须尊重数据限制和缓存/数据源失败边界
+- 黄金和短债高配说明不能变成交易命令
+
+已明确限制：
+- 不接 OpenAI API
+- 不接云端 API
+- 不训练模型
+- 不微调模型
+- 不写投资建议
+- 不预测短期涨跌
+- 不修改 .env
+- 不提交 API key
+- 不创建真实 current_holdings.csv
+- 不创建真实 market_data_manual.csv
+- 不提交 outputs/eval 真实评估结果
+- 不提交 outputs/answers 真实问答记录
+- 不把 historical outcome 写成 forecast
+
 ## 当前技术原则
 
 - 事实数据来自 provider
@@ -313,6 +356,6 @@
 
 ## 下一阶段计划
 
-阶段 5.2：待规划。
+阶段 5.3：待规划。
 
-阶段 5.1 已完成 Ollama 本地模型真实回答接入。下一阶段仍需遵守不接云端 API、不训练模型、不预测未来、不写投资建议的边界。
+阶段 5.2 已完成本地模型回答质量评估集。下一阶段仍需遵守不接云端 API、不训练模型、不预测未来、不写投资建议的边界。
