@@ -11,6 +11,7 @@ data/processed/
 data/holdings/current_holdings.csv
 data/manual/market_data_manual.csv
 data/history/market/*.raw.json
+data/history/fred/*.raw.json
 *.sqlite
 *.db
 .DS_Store

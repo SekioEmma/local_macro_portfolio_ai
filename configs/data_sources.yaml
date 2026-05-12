@@ -173,3 +173,68 @@ data_quality:
     max_stale_days: 3
     source_tier: "third_party_api_or_manual_fallback"
     importance: "optional"
+
+macro_regime_series:
+  sp500:
+    series_id: "SP500"
+    name: "S&P 500 Index"
+    frequency: "daily"
+    role: "equity_market"
+  nasdaq:
+    series_id: "NASDAQCOM"
+    name: "NASDAQ Composite Index"
+    frequency: "daily"
+    role: "growth_equity_market"
+  nasdaq100:
+    series_id: "NASDAQ100"
+    name: "NASDAQ 100 Index"
+    frequency: "daily"
+    role: "growth_equity_market"
+  dgs10:
+    series_id: "DGS10"
+    name: "10-Year Treasury Constant Maturity Rate"
+    frequency: "daily"
+    role: "long_rate"
+  fedfunds:
+    series_id: "FEDFUNDS"
+    name: "Federal Funds Effective Rate"
+    frequency: "monthly"
+    role: "policy_rate"
+  cpi:
+    series_id: "CPIAUCSL"
+    name: "CPI"
+    frequency: "monthly"
+    role: "inflation"
+  pce:
+    series_id: "PCEPI"
+    name: "PCE Price Index"
+    frequency: "monthly"
+    role: "inflation"
+  nonfarm:
+    series_id: "PAYEMS"
+    name: "Total Nonfarm Payrolls"
+    frequency: "monthly"
+    role: "labor_market"
+  usd_cny:
+    series_id: "DEXCHUS"
+    name: "USD/CNY"
+    frequency: "daily"
+    role: "fx"
+
+crisis_windows:
+  global_financial_crisis:
+    name: "Global Financial Crisis"
+    start: "2007-10-01"
+    end: "2009-03-31"
+  covid_crash:
+    name: "COVID-19 Market Crash"
+    start: "2020-02-01"
+    end: "2020-04-30"
+  inflation_rate_shock_2022:
+    name: "2022 Inflation and Rate Shock"
+    start: "2022-01-01"
+    end: "2022-12-31"
+  ai_liquidity_cycle_2023_2026:
+    name: "AI and Liquidity Cycle"
+    start: "2023-01-01"
+    end: "2026-12-31"
