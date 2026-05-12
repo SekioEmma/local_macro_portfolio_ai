@@ -440,6 +440,7 @@ def _source_record(
         "source": source_override or item.get("source"),
         "series_id": item.get("series_id"),
         "symbol": item.get("symbol"),
+        "function": item.get("function"),
         "observation_date": item.get("observation_date"),
         "status": item.get("status"),
     }
@@ -494,6 +495,7 @@ def _same_source_identity(left: dict, right: dict) -> bool:
         left.get("source") == right.get("source")
         and left.get("series_id") == right.get("series_id")
         and left.get("symbol") == right.get("symbol")
+        and left.get("function") == right.get("function")
     )
 
 
@@ -584,13 +586,14 @@ def _data_sources_table(data_sources: list[dict]) -> str:
             _display(item.get("source")),
             _display(item.get("series_id")),
             _display(item.get("symbol")),
+            _display(item.get("function")),
             _display(item.get("observation_date")),
             _display(item.get("status")),
         ]
         for item in data_sources
     ]
     return _markdown_table(
-        ["Key", "Source", "Series ID", "Symbol", "Observation date", "Status"],
+        ["Key", "Source", "Series ID", "Symbol", "Function", "Observation date", "Status"],
         rows,
     )
 
@@ -736,6 +739,7 @@ def _dedupe_sources(sources: list[dict]) -> list[dict]:
             source.get("source"),
             source.get("series_id"),
             source.get("symbol"),
+            source.get("function"),
         )
         if key in seen:
             continue

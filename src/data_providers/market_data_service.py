@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from . import fed_provider, fred_provider, yfinance_provider
+from . import alpha_vantage_provider, fed_provider, fred_provider, yfinance_provider
 
 
 MARKET_DATA_KEYS = ("sp500", "nasdaq", "nasdaq100", "gold")
@@ -171,6 +171,10 @@ def get_market_item(key: str, config: dict) -> dict:
                 item["observation_date"] = result["observation_date"]
             if result.get("currency"):
                 item["currency"] = result["currency"]
+            if result.get("function") or candidate.get("function"):
+                item["function"] = result.get("function") or candidate.get("function")
+            if result.get("source_tier") or candidate.get("source_tier"):
+                item["source_tier"] = result.get("source_tier") or candidate.get("source_tier")
             if result.get("updated_at"):
                 item["updated_at"] = result["updated_at"]
             if result.get("path"):
@@ -216,6 +220,8 @@ def _provider_candidates(key: str, config: dict) -> list[dict]:
 
     if key == "gold":
         return [
+            _alpha_vantage_candidate(key, config, mode="spot"),
+            _alpha_vantage_candidate(key, config, mode="history"),
             _manual_candidate(key, config),
             _yfinance_candidate(key, config),
         ]
@@ -304,6 +310,45 @@ def _manual_candidate(key: str, config: dict) -> dict:
     }
 
 
+def _alpha_vantage_candidate(key: str, config: dict, mode: str) -> dict:
+    alpha_vantage_config = _optional_mapping(config, "alpha_vantage")
+    gold_config = alpha_vantage_config.get("gold", {})
+    if not alpha_vantage_config.get("enabled", False):
+        return {
+            "provider": "config",
+            "source": "config",
+            "name": key,
+            "asset_type": "commodity",
+            "error": "alpha_vantage.enabled is false",
+        }
+    if not isinstance(gold_config, dict):
+        return {
+            "provider": "config",
+            "source": "config",
+            "name": key,
+            "asset_type": "commodity",
+            "error": "alpha_vantage.gold not configured",
+        }
+
+    if mode == "spot":
+        function_name = gold_config.get("spot_function") or "GOLD_SILVER_SPOT"
+        name = "Gold spot price"
+    else:
+        function_name = gold_config.get("history_function") or "GOLD_SILVER_HISTORY"
+        name = "Gold daily history latest price"
+
+    return {
+        "provider": "alpha_vantage",
+        "mode": mode,
+        "function": str(function_name),
+        "symbol": str(gold_config.get("symbol") or "GOLD"),
+        "interval": str(gold_config.get("interval") or "daily"),
+        "name": name,
+        "asset_type": "commodity",
+        "source_tier": "third_party_api",
+    }
+
+
 def _yfinance_candidate(
     key: str,
     config: dict,
@@ -354,6 +399,13 @@ def _call_provider(candidate: dict) -> dict:
     if provider == "manual":
         return _get_manual_market_item(candidate["key"], candidate["path"])
 
+    if provider == "alpha_vantage":
+        if candidate.get("mode") == "spot":
+            return alpha_vantage_provider.get_gold_spot()
+        return alpha_vantage_provider.get_gold_history_latest(
+            interval=str(candidate.get("interval") or "daily")
+        )
+
     return {
         "value": None,
         "source": candidate.get("source") or provider,
@@ -379,6 +431,10 @@ def _attempt_summary(candidate: dict, result: dict) -> dict:
         summary["observation_date"] = result["observation_date"]
     if result.get("currency"):
         summary["currency"] = result["currency"]
+    if candidate.get("function") or result.get("function"):
+        summary["function"] = result.get("function") or candidate.get("function")
+    if result.get("source_tier") or candidate.get("source_tier"):
+        summary["source_tier"] = result.get("source_tier") or candidate.get("source_tier")
     if candidate.get("path") or result.get("path"):
         summary["path"] = result.get("path") or candidate.get("path")
     if result.get("updated_at"):
@@ -420,6 +476,8 @@ def _market_error(
 
 def _attempt_label(attempt: dict) -> str:
     label = str(attempt.get("source") or "unknown")
+    if attempt.get("function"):
+        label = f"{label} {attempt['function']}"
     if attempt.get("series_id"):
         return f"{label} {attempt['series_id']}"
     if attempt.get("symbol"):
