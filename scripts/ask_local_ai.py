@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -21,16 +23,25 @@ from llm.context_loader import (
     summarize_data_limitations,
     validate_context_health,
 )
-from llm.local_llm_client import call_local_llm
-from llm.prompt_builder import build_answer_prompt
+from llm.local_llm_client import call_local_llm, check_ollama_health
+from llm.prompt_builder import build_answer_prompt, build_validation_repair_prompt
 
 
 CONFIG_PATH = PROJECT_ROOT / "configs" / "llm.yaml"
 REPORT_DIR = PROJECT_ROOT / "outputs" / "reports"
+ANSWER_ARCHIVE_ROOT = PROJECT_ROOT / "outputs" / "answers"
 CONTEXT_MD_PATH = REPORT_DIR / "llm_context_pack.md"
 CONTEXT_JSON_PATH = REPORT_DIR / "llm_context_pack.json"
 PROMPT_OUTPUT_PATH = REPORT_DIR / "latest_llm_prompt.md"
 ANSWER_OUTPUT_PATH = REPORT_DIR / "latest_llm_answer.md"
+FORBIDDEN_ANSWER_PATTERNS = [
+    "保证收益",
+    "一定会涨",
+    "明天会涨",
+    "立即买入",
+    "满仓",
+    "清仓",
+]
 
 
 def main() -> None:
@@ -72,16 +83,93 @@ def main() -> None:
     _write_utf8_markdown(PROMPT_OUTPUT_PATH, prompt)
 
     context_health = context_pack.get("context_health", {})
+    ollama_health = None
     if mode == "local_http" and not context_health.get("should_allow_model_call", False):
         result = {
             "status": "blocked_degraded_context",
+            "provider": config.get("local_llm", {}).get("provider"),
+            "model": config.get("local_llm", {}).get("model"),
             "prompt": prompt,
             "answer": None,
+            "removed_thinking": False,
+            "cleaning_notes": [],
             "error": "Context health does not allow model calls. Set context_policy.allow_degraded_context=true to override.",
+            "raw_metadata": {},
         }
     else:
-        result = call_local_llm(prompt, config)
+        if mode == "local_http":
+            ollama_health = check_ollama_health(config)
+            if ollama_health.get("status") not in {"ok", "skipped"}:
+                result = {
+                    "status": "ollama_health_error",
+                    "provider": config.get("local_llm", {}).get("provider"),
+                    "model": config.get("local_llm", {}).get("model"),
+                    "prompt": prompt,
+                    "answer": None,
+                    "removed_thinking": False,
+                    "cleaning_notes": [],
+                    "error": ollama_health.get("error") or ollama_health.get("hint"),
+                    "raw_metadata": {
+                        "ollama_health": ollama_health,
+                    },
+                }
+            else:
+                result = call_local_llm(prompt, config)
+        else:
+            result = call_local_llm(prompt, config)
+
+    if result.get("answer"):
+        guarded = _apply_deterministic_answer_guardrails(
+            result["answer"],
+            context_pack,
+        )
+        result["answer"] = guarded["answer"]
+        if guarded["notes"]:
+            result["cleaning_notes"] = [
+                *result.get("cleaning_notes", []),
+                *guarded["notes"],
+            ]
+
     answer_path = None
+    archive_paths = {}
+    answer_validation = validate_answer_text(
+        result.get("answer") or "",
+        user_question=user_question,
+        context_json=context_pack.get("context_json", {}),
+    )
+    if (
+        mode == "local_http"
+        and result.get("status") == "ok"
+        and answer_validation.get("status") == "warning"
+    ):
+        repair_prompt = build_validation_repair_prompt(
+            user_question=user_question,
+            context_pack=context_pack,
+            validation_warnings=answer_validation.get("warnings", []),
+        )
+        _write_utf8_markdown(PROMPT_OUTPUT_PATH, repair_prompt)
+        retry_result = call_local_llm(repair_prompt, config)
+        if retry_result.get("answer"):
+            guarded = _apply_deterministic_answer_guardrails(
+                retry_result["answer"],
+                context_pack,
+            )
+            retry_result["answer"] = guarded["answer"]
+            retry_notes = [
+                "Retried with compact validation repair prompt.",
+                *retry_result.get("cleaning_notes", []),
+                *guarded["notes"],
+            ]
+            retry_result["cleaning_notes"] = retry_notes
+            retry_validation = validate_answer_text(
+                retry_result.get("answer") or "",
+                user_question=user_question,
+                context_json=context_pack.get("context_json", {}),
+            )
+            if retry_validation.get("status") != "warning":
+                result = retry_result
+                answer_validation = retry_validation
+                prompt = repair_prompt
 
     if mode == "prompt_only":
         print(f"Prompt saved to: {PROMPT_OUTPUT_PATH}")
@@ -113,20 +201,39 @@ def main() -> None:
                     "status": result.get("status"),
                     "error": result.get("error"),
                     "context_health": context_health,
+                    "ollama_health": ollama_health,
                 },
                 ensure_ascii=False,
                 indent=2,
             )
         )
 
+    if mode == "local_http" and _save_answer_archive(config):
+        archive_paths = _archive_answer_run(
+            question=user_question,
+            prompt=prompt,
+            answer=result.get("answer"),
+            result=result,
+            config=config,
+            context_health=context_health,
+            answer_validation=answer_validation,
+        )
+
     summary = {
         "status": result.get("status"),
         "mode": mode,
+        "provider": result.get("provider"),
+        "model": result.get("model"),
         "prompt_path": str(PROMPT_OUTPUT_PATH),
         "answer_path": answer_path,
+        "archive_paths": archive_paths,
         "context_health": context_health,
+        "ollama_health": ollama_health,
         "data_limitation_count": len(context_pack.get("data_limitations", [])),
         "data_limitations": context_pack.get("compressed_data_limitations", []),
+        "removed_thinking": result.get("removed_thinking", False),
+        "cleaning_notes": result.get("cleaning_notes", []),
+        "answer_validation": answer_validation,
     }
     if result.get("error"):
         summary["error"] = result["error"]
@@ -187,13 +294,17 @@ def _load_config(path: Path) -> dict[str, Any]:
 def _default_config() -> dict[str, Any]:
     return {
         "local_llm": {
-            "mode": "prompt_only",
-            "provider": "generic_local_http",
+            "mode": "local_http",
+            "provider": "ollama",
             "endpoint": "http://localhost:11434/api/generate",
-            "model": "local-model",
-            "timeout_seconds": 120,
-            "temperature": 0.2,
-            "max_context_chars": 60000,
+            "model": "gemma4:e2b",
+            "timeout_seconds": 240,
+            "temperature": 0.1,
+            "top_p": 0.9,
+            "num_ctx": 4096,
+            "max_context_chars": 16000,
+            "save_answer_archive": True,
+            "strip_thinking_output": True,
         },
         "prompt_policy": {
             "language": "zh-CN",
@@ -201,6 +312,9 @@ def _default_config() -> dict[str, Any]:
             "forbid_forecast_claims": True,
             "forbid_trade_commands": True,
             "require_uncertainty_section": True,
+            "require_sample_fallback_warning": True,
+            "require_context_only_answer": True,
+            "forbid_thinking_process_output": True,
         },
         "context_policy": {
             "allow_degraded_context": False,
@@ -249,6 +363,190 @@ def _parse_scalar(value: str) -> Any:
         return int(value)
     except ValueError:
         return value
+
+
+def validate_answer_text(
+    answer: str,
+    user_question: str = "",
+    context_json: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    warnings = []
+    if not answer:
+        return {
+            "status": "not_applicable",
+            "warnings": warnings,
+        }
+
+    for pattern in FORBIDDEN_ANSWER_PATTERNS:
+        if pattern in answer:
+            warnings.append(f"Forbidden phrase detected: {pattern}")
+
+    amount_patterns = [
+        r"买入\s*[\d,]+(?:\.\d+)?\s*(?:元|人民币|块)",
+        r"卖出\s*[\d,]+(?:\.\d+)?\s*(?:元|人民币|块)",
+    ]
+    for pattern in amount_patterns:
+        if re.search(pattern, answer):
+            warnings.append(f"Forbidden trade amount pattern detected: {pattern}")
+
+    context_json = context_json or {}
+    holdings_source = _find_holdings_source(context_json)
+    if holdings_source.get("mode"):
+        ignore_portfolio_patterns = [
+            r"未提供您的投资组合",
+            r"没有提供投资组合",
+            r"无法评估.*组合",
+            r"缺乏.*组合",
+            r"未包含.*组合",
+        ]
+        for pattern in ignore_portfolio_patterns:
+            if re.search(pattern, answer):
+                warnings.append("Answer appears to ignore portfolio facts.")
+                break
+
+    question_lower = user_question.lower()
+    answer_lower = answer.lower()
+    if "组合" in user_question:
+        portfolio_keywords = [
+            "sp500",
+            "nasdaq100",
+            "short_bond",
+            "gold",
+            "underweight",
+            "overweight",
+            "低配",
+            "高配",
+        ]
+        if not any(keyword in answer_lower or keyword in answer for keyword in portfolio_keywords):
+            warnings.append("Answer does not reference portfolio allocation facts.")
+
+    if "过热" in user_question:
+        market_keywords = [
+            "warm_but_macro_sensitive",
+            "equity_temperature",
+            "risk_level",
+            "偏热",
+            "过热",
+        ]
+        if not any(keyword in answer_lower or keyword in answer for keyword in market_keywords):
+            warnings.append("Answer does not reference market temperature facts.")
+
+    return {
+        "status": "warning" if warnings else "ok",
+        "warnings": _dedupe_strings(warnings),
+    }
+
+
+def _apply_deterministic_answer_guardrails(
+    answer: str,
+    context_pack: dict[str, Any],
+) -> dict[str, Any]:
+    notes = []
+    updated = answer.strip()
+    context_json = context_pack.get("context_json", {}) if isinstance(context_pack, dict) else {}
+    holdings_source = _find_holdings_source(context_json)
+
+    if holdings_source.get("mode") == "sample_fallback" and not _mentions_sample_fallback(updated):
+        prefix = (
+            "重要说明：当前账户数据来自 sample_fallback（示例持仓），不是真实账户数据；"
+            "以下内容只基于 context pack 做本地研究说明，不构成投资建议。\n\n"
+        )
+        updated = prefix + updated
+        notes.append("Prepended required sample_fallback warning.")
+
+    return {
+        "answer": updated,
+        "notes": notes,
+    }
+
+
+def _mentions_sample_fallback(answer: str) -> bool:
+    lower = answer.lower()
+    return (
+        "sample_fallback" in lower
+        or "示例持仓" in answer
+        or "不是真实账户" in answer
+        or "非真实账户" in answer
+    )
+
+
+def _find_holdings_source(context_json: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(context_json, dict):
+        return {}
+    candidates = [
+        context_json.get("portfolio_context", {}).get("holdings_source", {}),
+        context_json.get("confirmed_facts", {}).get("portfolio", {}).get("holdings_source", {}),
+        context_json.get("data_quality", {}).get("portfolio_holdings_source", {}),
+    ]
+    for candidate in candidates:
+        if isinstance(candidate, dict) and candidate:
+            return candidate
+    return {}
+
+
+def _dedupe_strings(items: list[str]) -> list[str]:
+    result = []
+    seen = set()
+    for item in items:
+        if item in seen:
+            continue
+        seen.add(item)
+        result.append(item)
+    return result
+
+
+def _archive_answer_run(
+    question: str,
+    prompt: str,
+    answer: str | None,
+    result: dict[str, Any],
+    config: dict[str, Any],
+    context_health: dict[str, Any],
+    answer_validation: dict[str, Any],
+) -> dict[str, str]:
+    now = datetime.now()
+    archive_dir = ANSWER_ARCHIVE_ROOT / now.strftime("%Y-%m-%d")
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    stamp = now.strftime("%H%M%S")
+
+    prompt_path = archive_dir / f"{stamp}_prompt.md"
+    answer_path = archive_dir / f"{stamp}_answer.md"
+    manifest_path = archive_dir / f"{stamp}_manifest.json"
+
+    _write_utf8_markdown(prompt_path, prompt)
+    if answer is not None:
+        _write_utf8_markdown(answer_path, answer)
+
+    local_config = config.get("local_llm", {}) if isinstance(config, dict) else {}
+    manifest = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "question": question,
+        "provider": result.get("provider") or local_config.get("provider"),
+        "model": result.get("model") or local_config.get("model"),
+        "context_health": context_health,
+        "status": result.get("status"),
+        "error": result.get("error"),
+        "removed_thinking": result.get("removed_thinking", False),
+        "cleaning_notes": result.get("cleaning_notes", []),
+        "answer_validation": answer_validation,
+    }
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    paths = {
+        "prompt": str(prompt_path),
+        "manifest": str(manifest_path),
+    }
+    if answer is not None:
+        paths["answer"] = str(answer_path)
+    return paths
+
+
+def _save_answer_archive(config: dict[str, Any]) -> bool:
+    local_config = config.get("local_llm", {}) if isinstance(config, dict) else {}
+    return bool(local_config.get("save_answer_archive", False))
 
 
 def _print_summary(summary: dict[str, Any]) -> None:

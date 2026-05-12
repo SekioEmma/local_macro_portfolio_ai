@@ -239,14 +239,61 @@
 - 不把 historical outcome 写成 forecast
 - 不允许模型编造 context pack 之外的数据
 
+### 阶段 5.1：Ollama 本地模型真实回答
+
+已完成：
+- configs/llm.yaml 默认切换到 local_http / ollama
+- 默认模型使用 gemma4:e2b
+- src/llm/local_llm_client.py 支持 Ollama /api/generate
+- scripts/ask_local_ai.py 支持保存 cleaned answer
+- outputs/answers/.gitkeep
+
+模型选择：
+- gemma4:e2b 已通过基本中文运行测试
+- gemma4:e4b 与 gemma4:e4b-lowctx 在当前 Windows + RTX 4060 Laptop 8GB VRAM + 16GB RAM 环境下出现 memory layout cannot be allocated
+- 阶段 5.1 暂不使用 gemma4:e4b 或 e4b-lowctx 作为默认模型，后续再排查
+
+能力：
+- 调用本机 Ollama endpoint: http://localhost:11434/api/generate
+- 调用前检查 Ollama /api/tags 或 /api/version
+- 如果 gemma4:e2b 不存在，提示 ollama pull gemma4:e2b
+- 保存 outputs/reports/latest_llm_prompt.md
+- 保存 outputs/reports/latest_llm_answer.md
+- 可选保存 outputs/answers/YYYY-MM-DD/HHMMSS_prompt.md
+- 可选保存 outputs/answers/YYYY-MM-DD/HHMMSS_answer.md
+- 可选保存 outputs/answers/YYYY-MM-DD/HHMMSS_manifest.json
+- 支持清理 Thinking Process / Thinking... / done thinking
+- manifest 记录 context_health、status、error、removed_thinking、cleaning_notes、answer_validation
+- 支持 context_health 阻断 degraded context，默认 allow_degraded_context=false
+- answer_validation 检查保证收益、短期确定性涨跌和具体买卖命令等违禁模式
+
+已明确限制：
+- 不接 OpenAI API
+- 不接任何云端 API
+- 不训练模型
+- 不微调模型
+- 不写具体买卖建议
+- 不预测短期涨跌
+- 不修改 .env
+- 不提交 API key
+- 不创建真实 current_holdings.csv
+- 不创建真实 market_data_manual.csv
+- 不提交 latest_llm_prompt.md / latest_llm_answer.md
+- 不提交 outputs/answers 真实问答记录
+- 不把 historical outcome 写成 forecast
+- 不允许模型绕过 context pack 编造数据
+- 不在 answer 文件中保存 Thinking Process / chain-of-thought
+
 ## 当前技术原则
 
 - 事实数据来自 provider
 - 持仓和收益由 portfolio_engine 计算
 - 市场温度由规则模型计算
 - 本地 LLM 问答接口只能读取 llm_context_pack
-- 默认 prompt_only，不调用模型
+- 默认 local_http 调用本机 Ollama
+- 默认模型为 gemma4:e2b
 - local_http 只允许本机 endpoint，不接云端 API
+- degraded context 默认阻断模型调用
 - LLM 不能编造数据
 - LLM 不能直接计算仓位
 - LLM 不能写投资建议或短期涨跌预测
@@ -266,6 +313,6 @@
 
 ## 下一阶段计划
 
-阶段 5.1：待规划。
+阶段 5.2：待规划。
 
-阶段 5.0 已完成最小本地 LLM 问答接口。下一阶段仍需遵守不接云端 API、不训练模型、不预测未来、不写投资建议的边界。
+阶段 5.1 已完成 Ollama 本地模型真实回答接入。下一阶段仍需遵守不接云端 API、不训练模型、不预测未来、不写投资建议的边界。

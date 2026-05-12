@@ -32,6 +32,8 @@ def build_answer_prompt(user_question: str, context_pack: dict[str, Any], config
     sample_fallback_note = _sample_fallback_note(context_json)
     context_unavailable_note = _context_unavailable_note(context_status, context_md, context_json)
     degraded_note = _degraded_context_note(context_health)
+    critical_facts = build_critical_facts_section(context_pack)
+    mandatory_answer_facts = _build_mandatory_answer_facts(context_pack)
 
     return "\n".join(
         [
@@ -65,12 +67,27 @@ def build_answer_prompt(user_question: str, context_pack: dict[str, Any], config
             f"- 回答语言：{prompt_policy.get('language', 'zh-CN')}",
             "- 如果 context pack 没有数据，直接说当前信息不足。",
             "- 如果账户还是 sample_fallback，必须说明当前不是真实账户。",
+            "- 如果 holdings_source.mode=sample_fallback，必须在核心结论中明确写出：当前账户数据是示例持仓，不是真实账户。",
+            "- 回答“对组合意味着什么”时，必须使用 Portfolio Critical Facts。",
+            "- 不得声称缺少组合配置，因为 Portfolio Critical Facts 已提供。",
+            "- 判断“是否过热”时，必须使用 Market Critical Facts 中的 rule-based assessments：equity_temperature、rate_pressure、inflation_pressure、overall_regime、risk_level。",
+            "- 可以说“不足以做确定性过热结论”，但不能说“没有相关指标”。",
             "- 如果问题要求具体买卖，改为给观察框架和风险提示，不给交易命令。",
             "- 如果问题要求预测涨跌，改为情景分析，不给确定性预测。",
             "- 所有结论必须能在 context pack 中找到依据；没有依据时明确说明缺失。",
+            "- 只输出最终答案。",
+            "- 不要输出 Thinking Process、思维过程、推理草稿、内部推理链。",
+            "- 不要输出 “Thinking...”。",
+            "- 如果模型有内部思考能力，只在内部使用，不要展示。",
             sample_fallback_note,
             context_unavailable_note,
             degraded_note,
+            "",
+            "# Critical Facts",
+            "",
+            "下面是必须优先使用的关键事实。回答中不得忽略这些事实，也不得声称这些事实不存在。",
+            "",
+            critical_facts,
             "",
             "# Context Health",
             "",
@@ -95,21 +112,230 @@ def build_answer_prompt(user_question: str, context_pack: dict[str, Any], config
             "",
             user_question.strip() or "N/A",
             "",
+            "# Mandatory Facts For This Question",
+            "",
+            "你的最终答案必须引用下面这些事实。若没有引用，答案不合格。",
+            "",
+            mandatory_answer_facts,
+            "",
             "# Required Output Format",
             "",
-            "请用中文回答，并按以下结构：",
-            "- 核心结论",
-            "- 关键事实",
-            "- 规则判断",
-            "- 历史参照",
-            "- 对组合的含义",
-            "- 数据限制与不确定性",
-            "- 可观察指标",
+            "请用中文回答，并严格按以下结构：",
+            "",
+            "## 核心结论",
+            "必须回答：当前更接近“偏热但宏观敏感”（warm_but_macro_sensitive），而不是无法判断；这不是短期涨跌预测。",
+            "",
+            "## 关键事实",
+            "必须至少列出：equity_temperature、overall_regime、risk_level、sp500 / nasdaq100 / short_bond / gold 的偏离方向、sample_fallback 警告。",
+            "",
+            "## 规则判断",
+            "解释 warm_but_macro_sensitive。必须说明这是规则判断，不是预测。",
+            "",
+            "## 历史参照",
+            "只能说 historical outcome is not forecast，不能把历史结果写成未来预测。",
+            "",
+            "## 对组合的含义",
+            "必须逐项引用：sp500 underweight、nasdaq100 underweight、short_bond overweight、gold overweight、DCA above_budget；不能给具体买卖指令。",
+            "",
+            "## 数据限制与不确定性",
+            "必须包含 sample_fallback 和 ETF proxy 限制。",
+            "",
+            "## 可观察指标",
+            "列出可观察指标，不给交易命令。",
             "",
             "再次确认：不要写投资建议，不要预测短期涨跌，不要把 historical outcome 写成 forecast，不要编造 context pack 外部数据。",
+            "只输出最终答案，不要输出 Thinking Process、Thinking...、推理草稿或内部推理链。",
             "",
         ]
     )
+
+
+def build_validation_repair_prompt(
+    user_question: str,
+    context_pack: dict[str, Any],
+    validation_warnings: list[str],
+) -> str:
+    mandatory_answer_facts = _build_mandatory_answer_facts(context_pack)
+    context_health = context_pack.get("context_health", {}) if isinstance(context_pack, dict) else {}
+    compressed_limitations = (
+        context_pack.get("compressed_data_limitations", []) if isinstance(context_pack, dict) else []
+    )
+    return "\n".join(
+        [
+            "# 本地回答重写任务",
+            "",
+            "上一版回答未通过 answer_validation。请只基于下面 facts 重写最终答案。",
+            "不要输出 Thinking Process、Thinking...、推理草稿或内部推理链。",
+            "不要给具体买卖金额或交易命令，不要预测短期涨跌，不要保证收益。",
+            "不得说缺少组合配置，因为组合配置已经在 Mandatory Facts 中提供。",
+            "",
+            "# Validation Warnings To Fix",
+            "",
+            _bullet_list(validation_warnings, "None."),
+            "",
+            "# User Question",
+            "",
+            user_question.strip() or "N/A",
+            "",
+            "# Context Health",
+            "",
+            _small_json(context_health),
+            "",
+            "# Mandatory Facts",
+            "",
+            mandatory_answer_facts,
+            "",
+            "# Compressed Data Limitations",
+            "",
+            _bullet_list(compressed_limitations, "None recorded."),
+            "",
+            "# Required Final Answer",
+            "",
+            "请用中文严格输出以下七个标题，并在对应标题下引用 Mandatory Facts：",
+            "",
+            "## 核心结论",
+            "必须写：当前更接近“偏热但宏观敏感”（warm_but_macro_sensitive），这不是短期涨跌预测；并说明 sample_fallback 不是真实账户。",
+            "",
+            "## 关键事实",
+            "必须列出 equity_temperature、overall_regime、risk_level，以及 sp500 / nasdaq100 / short_bond / gold 的偏离方向。",
+            "",
+            "## 规则判断",
+            "解释 warm_but_macro_sensitive 是规则判断，不是预测。",
+            "",
+            "## 历史参照",
+            "必须写 historical outcome is not forecast。",
+            "",
+            "## 对组合的含义",
+            "必须逐项写出 sp500 underweight、nasdaq100 underweight、short_bond overweight、gold overweight、DCA above_budget；不给买卖命令。",
+            "",
+            "## 数据限制与不确定性",
+            "必须写 sample_fallback 不是账户真实数据，ETF proxy 不是真实基金净值。",
+            "",
+            "## 可观察指标",
+            "列观察指标，不给交易命令。",
+            "",
+        ]
+    )
+
+
+def _build_mandatory_answer_facts(context_pack: dict[str, Any]) -> str:
+    context_json = context_pack.get("context_json", {}) if isinstance(context_pack, dict) else {}
+    if not isinstance(context_json, dict):
+        return "- mandatory facts unavailable."
+
+    portfolio = context_json.get("portfolio_context", {})
+    assessments = context_json.get("rule_based_assessments", {})
+    market_temperature = assessments.get("market_temperature", {}) if isinstance(assessments, dict) else {}
+    holdings_source = _find_holdings_source(context_json)
+
+    weights = portfolio.get("weights_ex_cash", {}) if isinstance(portfolio, dict) else {}
+    targets = portfolio.get("target_allocation", {}) if isinstance(portfolio, dict) else {}
+    deviations = portfolio.get("deviation", {}) if isinstance(portfolio, dict) else {}
+    flags = portfolio.get("deviation_flags", {}) if isinstance(portfolio, dict) else {}
+    dca = portfolio.get("dca_budget_check", {}) if isinstance(portfolio, dict) else {}
+
+    lines = [
+        "- Market: equity_temperature "
+        + f"{_level(market_temperature.get('equity_temperature'))}; "
+        + f"overall_regime {_display(market_temperature.get('overall_regime'))}; "
+        + f"risk_level {_display(market_temperature.get('risk_level'))}.",
+        "- Required wording: 当前更接近“偏热但宏观敏感”（warm_but_macro_sensitive），这不是短期涨跌预测。",
+        f"- Portfolio data source: {_display(holdings_source.get('mode'))}, not real account.",
+    ]
+    for asset in ("sp500", "nasdaq100", "short_bond", "gold"):
+        lines.append(
+            "- Must cite: "
+            + f"{asset} current {_format_percent(weights.get(asset))}, "
+            + f"target {_format_percent(targets.get(asset))}, "
+            + f"deviation {_format_pp(deviations.get(asset))}, "
+            + f"{_display(flags.get(asset))}."
+        )
+    lines.append(
+        "- Must cite: DCA monthly_required "
+        + f"{_format_number(dca.get('monthly_required'))}, "
+        + f"budget range {_format_number(dca.get('budget_min'))}-{_format_number(dca.get('budget_max'))}, "
+        + f"status {_display(dca.get('status'))}."
+    )
+    lines.append("- Do not say portfolio allocation is missing; the portfolio facts above are available.")
+    return "\n".join(lines)
+
+
+def build_critical_facts_section(context_pack: dict[str, Any]) -> str:
+    context_json = context_pack.get("context_json", {}) if isinstance(context_pack, dict) else {}
+    context_health = context_pack.get("context_health", {}) if isinstance(context_pack, dict) else {}
+    if not isinstance(context_json, dict) or not context_json:
+        return "Critical facts unavailable: context_json is missing."
+
+    data_quality = context_json.get("data_quality", {})
+    if not isinstance(data_quality, dict):
+        data_quality = {}
+    portfolio = context_json.get("portfolio_context", {})
+    confirmed = context_json.get("confirmed_facts", {})
+    market_facts = confirmed.get("market", {}) if isinstance(confirmed, dict) else {}
+    assessments = context_json.get("rule_based_assessments", {})
+    market_temperature = assessments.get("market_temperature", {}) if isinstance(assessments, dict) else {}
+    history_features = (
+        context_json.get("historical_context", {})
+        .get("market_history_features", {})
+        if isinstance(context_json.get("historical_context", {}), dict)
+        else {}
+    )
+    current_regime = (
+        context_json.get("historical_context", {})
+        .get("macro_regime_history", {})
+        .get("crisis_window_summary", {})
+        .get("ai_liquidity_cycle_2023_2026", {})
+    )
+
+    holdings_source = _find_holdings_source(context_json)
+    lines = [
+        "## Context Health",
+        f"- status: {_display(context_health.get('status'))}",
+        f"- holdings_source.mode: {_display(holdings_source.get('mode'))}",
+        f"- market_snapshot.status: {_display(data_quality.get('market_snapshot_status'))}",
+        f"- used_cache: {_display(data_quality.get('used_cache'))}",
+        "",
+        "## Market Critical Facts",
+        f"- equity_temperature: {_level(market_temperature.get('equity_temperature'))}",
+        f"- rate_pressure: {_level(market_temperature.get('rate_pressure'))}",
+        f"- inflation_pressure: {_level(market_temperature.get('inflation_pressure'))}",
+        f"- labor_market: {_level(market_temperature.get('labor_market'))}",
+        f"- overall_regime: {_display(market_temperature.get('overall_regime'))}",
+        f"- risk_level: {_display(market_temperature.get('risk_level'))}",
+        f"- SP500 1m/3m change: {_history_return_line(history_features.get('spy'), label='SPY proxy for S&P 500')}",
+        f"- NASDAQ 1m/3m change: {_history_return_line(history_features.get('qqq'), label='QQQ proxy for Nasdaq 100')}",
+        f"- DGS10 latest: {_format_number(_nested(market_facts, ('dgs10', 'value')))}",
+        f"- CPI YoY: {_format_yoy(_nested(current_regime, ('inflation', 'cpi_yoy', 'end_yoy')))}",
+        f"- PCE YoY: {_format_yoy(_nested(current_regime, ('inflation', 'pce_yoy', 'end_yoy')))}",
+        "",
+        "## Portfolio Critical Facts",
+        f"- Portfolio data source: {_display(holdings_source.get('mode'))}, not real account.",
+        f"- total_assets: {_format_number(_nested(context_json, ('confirmed_facts', 'portfolio', 'total_assets')))}",
+        f"- invested_assets: {_format_number(_nested(context_json, ('confirmed_facts', 'portfolio', 'invested_assets')))}",
+        f"- cash: {_format_number(_nested(context_json, ('confirmed_facts', 'portfolio', 'cash')))}",
+    ]
+
+    weights = portfolio.get("weights_ex_cash", {}) if isinstance(portfolio, dict) else {}
+    targets = portfolio.get("target_allocation", {}) if isinstance(portfolio, dict) else {}
+    deviations = portfolio.get("deviation", {}) if isinstance(portfolio, dict) else {}
+    flags = portfolio.get("deviation_flags", {}) if isinstance(portfolio, dict) else {}
+    for asset in ("sp500", "nasdaq100", "short_bond", "gold"):
+        lines.append(
+            "- "
+            + f"{asset}: current {_format_percent(weights.get(asset))}, "
+            + f"target {_format_percent(targets.get(asset))}, "
+            + f"deviation {_format_pp(deviations.get(asset))}, "
+            + f"flag {_display(flags.get(asset))}."
+        )
+
+    dca = portfolio.get("dca_budget_check", {}) if isinstance(portfolio, dict) else {}
+    lines.append(
+        "- DCA budget: monthly_required "
+        + f"{_format_number(dca.get('monthly_required'))}, "
+        + f"budget range {_format_number(dca.get('budget_min'))}-{_format_number(dca.get('budget_max'))}, "
+        + f"status {_display(dca.get('status'))}."
+    )
+    return "\n".join(lines)
 
 
 def _prepare_context_excerpt(context_md: str, max_context_chars: int) -> str:
@@ -117,16 +343,18 @@ def _prepare_context_excerpt(context_md: str, max_context_chars: int) -> str:
         return ""
 
     compacted = _remove_verbose_limitations(context_md)
+    compact_budget = min(max_context_chars, 5000)
     if len(compacted) <= max_context_chars:
-        return compacted
+        preferred = _extract_preferred_sections(compacted)
+        return preferred[:compact_budget].rstrip() if preferred else compacted[:compact_budget].rstrip()
 
     preferred = _extract_preferred_sections(compacted)
-    if preferred and len(preferred) <= max_context_chars:
+    if preferred and len(preferred) <= compact_budget:
         return preferred
     if preferred:
-        return preferred[:max_context_chars].rstrip() + "\n\n[Context truncated at max_context_chars.]"
+        return preferred[:compact_budget].rstrip() + "\n\n[Context truncated for local model context window.]"
 
-    return compacted[:max_context_chars].rstrip() + "\n\n[Context truncated at max_context_chars.]"
+    return compacted[:compact_budget].rstrip() + "\n\n[Context truncated for local model context window.]"
 
 
 def _remove_verbose_limitations(context_md: str) -> str:
@@ -261,6 +489,76 @@ def _bullet_list(items: list[Any], empty_text: str) -> str:
 
 def _small_json(payload: dict[str, Any]) -> str:
     return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def _level(value: Any) -> str:
+    if isinstance(value, dict):
+        return _display(value.get("level"))
+    return _display(value)
+
+
+def _history_return_line(item: Any, label: str) -> str:
+    if not isinstance(item, dict):
+        return "unavailable"
+    one_month = _nested(item, ("return_1m", "value"))
+    three_month = _nested(item, ("return_3m", "value"))
+    return (
+        f"{label}: 1m {_format_percent(one_month)}, "
+        f"3m {_format_percent(three_month)}"
+    )
+
+
+def _nested(source: Any, path: tuple[str, ...]) -> Any:
+    current = source
+    for key in path:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current
+
+
+def _format_number(value: Any) -> str:
+    if value is None:
+        return "unavailable"
+    try:
+        return f"{float(value):.2f}"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _format_percent(value: Any) -> str:
+    if value is None:
+        return "unavailable"
+    try:
+        return f"{float(value) * 100:.2f}%"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _format_pp(value: Any) -> str:
+    if value is None:
+        return "unavailable"
+    try:
+        pp = float(value) * 100
+        sign = "+" if pp > 0 else ""
+        return f"{sign}{pp:.2f}pp"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _format_yoy(value: Any) -> str:
+    if value is None:
+        return "unavailable"
+    try:
+        return f"{float(value):.2f}%"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _display(value: Any) -> str:
+    if value is None or value == "":
+        return "unavailable"
+    return str(value)
 
 
 def _as_int(value: Any, default: int) -> int:
