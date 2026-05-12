@@ -203,14 +203,53 @@
 - 不提交 outputs/archive 里的真实快照
 - historical outcome is not forecast
 
+### 阶段 5.0：本地 LLM 最小问答接口
+
+已完成：
+- configs/llm.yaml
+- src/llm/context_loader.py
+- src/llm/prompt_builder.py
+- src/llm/local_llm_client.py
+- scripts/ask_local_ai.py
+
+能力：
+- 默认 mode=prompt_only，只生成 prompt，不调用模型
+- 读取 outputs/reports/llm_context_pack.md
+- 读取 outputs/reports/llm_context_pack.json
+- 基于用户问题生成带安全边界的中文回答 prompt
+- prompt 明确要求只基于 context pack 回答
+- prompt 明确区分 confirmed facts、rule-based assessments、historical outcomes、reasonable inferences、assumptions、uncertainties
+- prompt_only 模式保存 outputs/reports/latest_llm_prompt.md
+- local_http 模式预留 localhost 本地 HTTP 调用
+- local_http 仅允许 localhost / 127.0.0.1 / ::1 endpoint
+
+已明确限制：
+- 不训练模型
+- 不微调模型
+- 不接 OpenAI API
+- 不接云端 API
+- 不写投资建议
+- 不预测短期涨跌
+- 不修改 .env
+- 不提交 API key
+- 不创建真实 current_holdings.csv
+- 不创建真实 market_data_manual.csv
+- 不提交 outputs/reports 生成文件
+- 不提交 outputs/archive 真实快照
+- 不把 historical outcome 写成 forecast
+- 不允许模型编造 context pack 之外的数据
+
 ## 当前技术原则
 
 - 事实数据来自 provider
 - 持仓和收益由 portfolio_engine 计算
 - 市场温度由规则模型计算
+- 本地 LLM 问答接口只能读取 llm_context_pack
+- 默认 prompt_only，不调用模型
+- local_http 只允许本机 endpoint，不接云端 API
 - LLM 不能编造数据
 - LLM 不能直接计算仓位
-- LLM 后续只负责解释、总结和报告生成
+- LLM 不能写投资建议或短期涨跌预测
 
 ## 当前不做
 
@@ -218,13 +257,15 @@
 - 不预测短期涨跌
 - 不保证收益
 - 不接支付宝自动抓取
-- 不接 LLM
+- 不接云端 LLM
+- 不调用 OpenAI API
 - 不训练模型
+- 不微调模型
 - 不做 iPad 部署
 - 不做复杂 UI
 
 ## 下一阶段计划
 
-阶段 4.12：待规划。
+阶段 5.1：待规划。
 
-阶段 4.11 已完成每日自动更新与历史快照归档。下一阶段仍需遵守不接 LLM、不训练模型、不预测未来、不写投资建议的边界。
+阶段 5.0 已完成最小本地 LLM 问答接口。下一阶段仍需遵守不接云端 API、不训练模型、不预测未来、不写投资建议的边界。

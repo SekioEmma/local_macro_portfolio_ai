@@ -9,6 +9,8 @@ outputs/archive/*
 !outputs/archive/.gitkeep
 outputs/reports/*.json
 outputs/reports/*.md
+outputs/reports/latest_llm_prompt.md
+outputs/reports/latest_llm_answer.md
 data/raw/
 data/processed/
 data/holdings/current_holdings.csv

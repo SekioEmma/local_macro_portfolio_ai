@@ -1,0 +1,20 @@
+local_llm:
+  mode: "prompt_only"
+  provider: "generic_local_http"
+  endpoint: "http://localhost:11434/api/generate"
+  model: "local-model"
+  timeout_seconds: 120
+  temperature: 0.2
+  max_context_chars: 60000
+
+prompt_policy:
+  language: "zh-CN"
+  require_source_awareness: true
+  forbid_forecast_claims: true
+  forbid_trade_commands: true
+  require_uncertainty_section: true
+
+context_policy:
+  allow_degraded_context: false
+  max_data_limitations_for_model_call: 20
+  allow_sample_fallback: true
