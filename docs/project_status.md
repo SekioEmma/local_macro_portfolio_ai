@@ -124,6 +124,85 @@
 - overall_regime: warm_but_macro_sensitive
 - risk_level: medium
 
+### 阶段 4.10：LLM Context Pack
+
+已完成：
+- src/reports/llm_context_pack.py
+- scripts/run_llm_context_pack.py
+
+能力：
+- 读取 portfolio_snapshot.json
+- 读取 market_snapshot.json
+- 读取 market_temperature.json
+- 读取 daily_report.md
+- 读取 market_history_features.json
+- 读取 macro_regime_history.json
+- 生成 outputs/reports/llm_context_pack.json
+- 生成 outputs/reports/llm_context_pack.md
+
+上下文包明确区分：
+- confirmed facts
+- rule-based assessments
+- historical outcomes
+- portfolio context
+- data quality
+- data limitations
+- allowed model tasks
+- forbidden model behaviors
+
+已明确限制：
+- historical outcome is not forecast
+- ETF proxy return is not actual fund NAV
+- sample_fallback is not real account data
+- LLM must not invent market data or portfolio holdings
+- LLM must not recommend frequent trading
+- LLM must not guarantee returns
+
+### 阶段 4.11：每日自动更新与历史快照归档
+
+已完成：
+- scripts/update_daily_report.ps1
+- scripts/archive_reports.py
+- docs/windows_task_scheduler.md
+- outputs/logs/.gitkeep
+- outputs/archive/.gitkeep
+
+能力：
+- 手动运行或由 Windows Task Scheduler 运行每日更新流程
+- 依次刷新组合快照、市场数据、市场温度、日报、历史市场特征、宏观 regime 历史分析、LLM Context Pack
+- 将 stdout/stderr 追加写入 outputs/logs/update_daily_report_YYYY-MM-DD.log
+- 将 outputs/reports/ 中的最新报告复制到 outputs/archive/YYYY-MM-DD/
+- 同一天重复运行时覆盖当天归档目录中的同名文件
+- 生成 outputs/archive/YYYY-MM-DD/archive_manifest.json
+
+存储策略：
+- outputs/reports/ 始终保存最新报告，每次运行覆盖
+- outputs/archive/YYYY-MM-DD/ 保存每日快照
+- outputs/logs/update_daily_report_YYYY-MM-DD.log 同一天追加写入
+- data/history/fred/*.raw.json 不做每日复制，作为本地缓存复用
+- data/history/market/*_YYYY-MM-DD.raw.json 作为 Alpha Vantage 当日缓存，普通运行优先复用
+- outputs/archive/、outputs/logs/、data/history/**/*.raw.json 不提交到 Git
+
+保留策略预留：
+- logs_retention_days = 30
+- archive_retention_days = 365
+- market_raw_cache_retention_days = 30
+- 第一版只记录保留策略，不自动删除历史文件
+
+已明确限制：
+- 不接 LLM
+- 不调用 OpenAI API
+- 不训练模型
+- 不写投资建议
+- 不预测未来
+- 不修改 .env
+- 不提交 API key
+- 不创建真实 current_holdings.csv
+- 不创建真实 market_data_manual.csv
+- 不提交 raw history JSON
+- 不提交 outputs/archive 里的真实快照
+- historical outcome is not forecast
+
 ## 当前技术原则
 
 - 事实数据来自 provider
@@ -146,27 +225,6 @@
 
 ## 下一阶段计划
 
-阶段 4：账户 + 市场综合报告。
+阶段 4.12：待规划。
 
-目标：
-读取：
-- outputs/reports/portfolio_snapshot.json
-- outputs/reports/market_snapshot.json
-- outputs/reports/market_temperature.json
-
-生成：
-- outputs/reports/daily_report.md
-- outputs/reports/daily_report.json
-
-报告包含：
-- 账户状态
-- 资产配置偏离
-- 定投预算压力
-- 市场温度
-- 宏观压力
-- 数据来源
-- 数据限制
-- 非投资建议声明
-
-注意：
-阶段 4 仍然不接 LLM，只生成规则化报告底稿。
+阶段 4.11 已完成每日自动更新与历史快照归档。下一阶段仍需遵守不接 LLM、不训练模型、不预测未来、不写投资建议的边界。
