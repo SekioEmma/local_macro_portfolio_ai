@@ -88,6 +88,7 @@ def main() -> None:
             eval_case=eval_case,
             original_answer=repair_context.get("original_answer"),
             missing_required_terms=repair_context.get("missing_required_terms", []),
+            forbidden_hits=repair_context.get("forbidden_hits", []),
         )
     else:
         prompt = build_answer_prompt(user_question, context_pack, config, eval_case=eval_case)
@@ -161,6 +162,7 @@ def main() -> None:
             validation_warnings=answer_validation.get("warnings", []),
             eval_case=eval_case,
             original_answer=result.get("answer"),
+            forbidden_hits=[],
         )
         _write_utf8_markdown(PROMPT_OUTPUT_PATH, repair_prompt)
         retry_result = call_local_llm(repair_prompt, config)

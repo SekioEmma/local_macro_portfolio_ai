@@ -151,7 +151,7 @@ def check_ollama_health(config: dict[str, Any]) -> dict[str, Any]:
                 "provider": provider,
                 "model": model,
                 "error": response.get("error") or version_response.get("error"),
-                "hint": "Start Ollama locally, then run: ollama pull gemma4:e2b",
+                "hint": f"Start Ollama locally, then run: ollama pull {model}",
             }
         return {
             "status": "model_unknown",

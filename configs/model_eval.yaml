@@ -1,0 +1,27 @@
+models:
+  - id: "gemma4_e2b"
+    provider: "ollama"
+    model: "gemma4:e2b"
+    num_ctx: 2048
+    max_context_chars: 5000
+    temperature: 0.1
+    top_p: 0.9
+    no_think_hint: false
+
+  - id: "qwen3_4b"
+    provider: "ollama"
+    model: "qwen3:4b"
+    num_ctx: 2048
+    max_context_chars: 5000
+    temperature: 0.1
+    top_p: 0.9
+    no_think_hint: true
+
+comparison:
+  eval_questions_path: "configs/eval_questions.yaml"
+  output_dir: "outputs/model_eval"
+  continue_on_model_error: true
+  run_repair: true
+  compact_prompt: true
+  preflight_prompt: "用一句中文回答：模型能运行。"
+  max_cases_per_model: 2

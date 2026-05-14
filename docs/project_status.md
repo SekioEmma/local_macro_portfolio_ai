@@ -327,6 +327,48 @@
 - 不提交 outputs/answers 真实问答记录
 - 不把 historical outcome 写成 forecast
 
+### 阶段 5.3：本地模型对比与 repair 依赖评估
+
+已完成：
+- configs/model_eval.yaml
+- src/eval/model_comparison.py
+- scripts/run_model_comparison.py
+- outputs/model_eval/.gitkeep
+
+模型范围：
+- gemma4:e2b
+- qwen3:4b
+- 暂不加入 qwen3:1.7b
+
+能力：
+- 读取固定评估集 configs/eval_questions.yaml
+- 按模型覆盖 configs/llm.yaml 中的本地 Ollama 配置
+- 检查 Ollama health 与模型是否存在
+- 对每个模型逐 case 记录 first-pass 回答
+- 对 first-pass 失败 case 触发本地 repair
+- 记录 final-pass 回答
+- 统计 first_pass_pass_rate
+- 统计 final_pass_rate
+- 统计 repair_used_count
+- 统计 repair_success_count
+- 记录 average_first_score 与 average_final_score
+- 结构化记录 model_not_found、model_health_error、model_memory_layout_error
+- 生成 outputs/model_eval/YYYY-MM-DD/model_comparison_summary.json
+- 生成 outputs/model_eval/YYYY-MM-DD/model_comparison_report.md
+
+已明确限制：
+- 不接 OpenAI API
+- 不接云端 API
+- 不训练模型
+- 不微调模型
+- 不写具体买卖建议
+- 不预测短期涨跌
+- 不修改 .env
+- 不提交 outputs/eval 真实评估结果
+- 不提交 outputs/answers 真实问答记录
+- 不提交 outputs/model_eval 真实结果
+- 不把 historical outcome 写成 forecast
+
 ## 当前技术原则
 
 - 事实数据来自 provider
@@ -356,6 +398,6 @@
 
 ## 下一阶段计划
 
-阶段 5.3：待规划。
+阶段 5.4：待规划。
 
-阶段 5.2 已完成本地模型回答质量评估集。下一阶段仍需遵守不接云端 API、不训练模型、不预测未来、不写投资建议的边界。
+阶段 5.3 已完成本地模型对比与 repair 依赖评估。下一阶段仍需遵守不接云端 API、不训练模型、不预测未来、不写投资建议的边界。

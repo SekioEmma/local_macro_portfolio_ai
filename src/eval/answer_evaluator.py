@@ -175,13 +175,36 @@ def _has_forbidden_term(answer: str, term: str) -> bool:
     if not term:
         return False
     if term == "保证":
-        for match in re.finditer(re.escape(term), answer):
-            prefix = answer[max(0, match.start() - 3) : match.start()]
-            if any(negation in prefix for negation in ("不", "不能", "无法", "不可", "不要")):
-                continue
-            return True
+        # A bare "保证" is too broad: "不能保证" is a valid risk warning.
         return False
-    return term.lower() in answer.lower()
+
+    for match in re.finditer(re.escape(term), answer, flags=re.IGNORECASE):
+        if _is_negated_or_refusal_context(answer, match.start()):
+            continue
+        return True
+    return False
+
+
+def _is_negated_or_refusal_context(answer: str, start: int) -> bool:
+    prefix = answer[max(0, start - 16) : start]
+    safe_markers = [
+        "不",
+        "不能",
+        "不应",
+        "不要",
+        "无法",
+        "不可",
+        "并非",
+        "不是",
+        "不构成",
+        "不能说",
+        "不能认为",
+        "不能得出",
+        "不能推出",
+        "不代表",
+        "不是预测",
+    ]
+    return any(marker in prefix for marker in safe_markers)
 
 
 def _score_result(

@@ -11,6 +11,8 @@ outputs/answers/*
 !outputs/answers/.gitkeep
 outputs/eval/*
 !outputs/eval/.gitkeep
+outputs/model_eval/*
+!outputs/model_eval/.gitkeep
 outputs/reports/*.json
 outputs/reports/*.md
 outputs/reports/latest_llm_prompt.md

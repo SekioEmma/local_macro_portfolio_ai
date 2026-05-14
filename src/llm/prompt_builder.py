@@ -147,6 +147,7 @@ def build_validation_repair_prompt(
     eval_case: dict[str, Any] | None = None,
     original_answer: str | None = None,
     missing_required_terms: list[str] | None = None,
+    forbidden_hits: list[str] | None = None,
 ) -> str:
     mandatory_answer_facts = _build_mandatory_answer_facts(context_pack)
     context_health = context_pack.get("context_health", {}) if isinstance(context_pack, dict) else {}
@@ -171,6 +172,10 @@ def build_validation_repair_prompt(
             "# Missing Required Terms To Fix",
             "",
             _bullet_list(missing_required_terms or [], "None."),
+            "",
+            "# Forbidden Hits To Remove",
+            "",
+            _bullet_list(forbidden_hits or [], "None."),
             "",
             "# Original Answer",
             "",
@@ -206,6 +211,126 @@ def build_validation_repair_prompt(
             "",
         ]
     )
+
+
+def build_compact_answer_prompt(
+    user_question: str,
+    context_pack: dict[str, Any],
+    config: dict[str, Any],
+    eval_case: dict[str, Any] | None = None,
+) -> str:
+    local_config = config.get("local_llm", {}) if isinstance(config, dict) else {}
+    max_chars = min(_as_int(local_config.get("max_context_chars"), default=5000), 5000)
+    context_health = context_pack.get("context_health", {}) if isinstance(context_pack, dict) else {}
+    compressed_limitations = (
+        context_pack.get("compressed_data_limitations", []) if isinstance(context_pack, dict) else []
+    )
+    parts = [
+        "# Compact Local Evaluation Prompt",
+        "",
+        "你是本地个人宏观投研与资产配置研究助手。只能基于下列 context facts 回答。",
+        "只输出最终答案。不要输出 Thinking Process、Thinking...、思维过程或内部推理链。",
+        "",
+        "# Forbidden Behaviors",
+        "",
+        "- 不得编造 context pack 外部市场数据、账户数据或来源。",
+        "- 不得把 historical outcome 写成 forecast；historical outcome is not forecast。",
+        "- 不得预测短期涨跌，不得保证收益。",
+        "- 不得给具体买入、卖出、金额、仓位调整或交易命令。",
+        "- 不得把 ETF proxy 当成真实基金净值。",
+        "- 不得把 sample_fallback 当成真实账户。",
+        "",
+        "# Critical Facts",
+        "",
+        build_critical_facts_section(context_pack),
+        "",
+        "# Eval Case Policy",
+        "",
+        build_eval_case_policy_section(eval_case, user_question),
+        "",
+        "# Context Health",
+        "",
+        _small_json(context_health),
+        "",
+        "# Compressed Data Limitations",
+        "",
+        _bullet_list(compressed_limitations[:6], "None recorded."),
+        "",
+        "# User Question",
+        "",
+        user_question.strip() or "N/A",
+        "",
+        "# Required Output Format",
+        "",
+        _required_output_format(eval_case),
+        "",
+        "再次确认：只输出最终答案，不要输出推理过程；不要编造数据；不要给交易命令。",
+        "",
+    ]
+    return _truncate_prompt_preserving_end("\n".join(parts), max_chars)
+
+
+def build_compact_repair_prompt(
+    user_question: str,
+    context_pack: dict[str, Any],
+    validation_warnings: list[str],
+    eval_case: dict[str, Any] | None = None,
+    original_answer: str | None = None,
+    missing_required_terms: list[str] | None = None,
+    forbidden_hits: list[str] | None = None,
+) -> str:
+    local_config = {}
+    if isinstance(context_pack, dict):
+        local_config = context_pack.get("_local_llm_config", {})
+    max_chars = min(_as_int(local_config.get("max_context_chars"), default=5000), 5000)
+    compressed_limitations = (
+        context_pack.get("compressed_data_limitations", []) if isinstance(context_pack, dict) else []
+    )
+    parts = [
+        "# Compact Repair Prompt",
+        "",
+        "上一版回答未通过本地规则评估。请只基于下列 facts 重写最终答案。",
+        "只输出最终答案，不要输出 Thinking Process、Thinking...、思维过程或内部推理链。",
+        "不要给具体买卖金额或交易命令，不要预测短期涨跌，不要保证收益。",
+        "",
+        "# Missing Required Terms To Fix",
+        "",
+        _bullet_list(missing_required_terms or [], "None."),
+        "",
+        "# Forbidden Hits To Remove",
+        "",
+        _bullet_list(forbidden_hits or [], "None."),
+        "",
+        "# Validation Warnings",
+        "",
+        _bullet_list(validation_warnings, "None."),
+        "",
+        "# Original Answer Excerpt",
+        "",
+        _truncate_for_prompt(original_answer or "N/A", 900),
+        "",
+        "# Critical Facts",
+        "",
+        build_critical_facts_section(context_pack),
+        "",
+        "# Eval Case Policy",
+        "",
+        build_eval_case_policy_section(eval_case, user_question),
+        "",
+        "# Compressed Data Limitations",
+        "",
+        _bullet_list(compressed_limitations[:6], "None recorded."),
+        "",
+        "# User Question",
+        "",
+        user_question.strip() or "N/A",
+        "",
+        "# Required Final Answer",
+        "",
+        _required_output_format(eval_case),
+        "",
+    ]
+    return _truncate_prompt_preserving_end("\n".join(parts), max_chars)
 
 
 def build_eval_case_policy_section(case: dict[str, Any] | None, user_question: str) -> str:
@@ -282,7 +407,7 @@ def _required_output_format(eval_case: dict[str, Any] | None) -> str:
             [
                 "请用中文回答，并严格按以下结构：",
                 "## 结论",
-                "必须写：不能判断真实收益。",
+                "必须写：当前信息不足以判断真实账户收益，不能判断真实收益。",
                 "## 原因",
                 "必须写：当前 holdings_source.mode=sample_fallback，是示例持仓，不是真实账户。",
                 "## 可以做什么",
@@ -629,6 +754,21 @@ def _truncate_for_prompt(text: str, max_chars: int) -> str:
     if len(clean) <= max_chars:
         return clean
     return clean[: max_chars - 3].rstrip() + "..."
+
+
+def _truncate_prompt_preserving_end(prompt: str, max_chars: int) -> str:
+    if len(prompt) <= max_chars:
+        return prompt
+    marker = "\n# User Question\n"
+    marker_index = prompt.find(marker)
+    tail = prompt[marker_index:] if marker_index >= 0 else prompt[-1200:]
+    head_budget = max(1000, max_chars - len(tail) - 120)
+    head = prompt[:head_budget].rstrip()
+    return (
+        head
+        + "\n\n[Compact prompt truncated before user question to fit local context.]\n"
+        + tail
+    )[:max_chars]
 
 
 def _small_json(payload: dict[str, Any]) -> str:
