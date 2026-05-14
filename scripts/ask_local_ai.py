@@ -7,6 +7,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+for stream in (sys.stdout, sys.stderr):
+    if hasattr(stream, "reconfigure"):
+        stream.reconfigure(encoding="utf-8", errors="replace")
+
 try:
     import yaml
 except ModuleNotFoundError:
@@ -24,7 +28,13 @@ from llm.context_loader import (
     validate_context_health,
 )
 from llm.local_llm_client import call_local_llm, check_ollama_health
-from llm.prompt_builder import build_answer_prompt, build_validation_repair_prompt
+from llm.prompt_builder import (
+    build_answer_prompt,
+    build_compact_answer_prompt,
+    build_compact_repair_prompt,
+    build_validation_repair_prompt,
+)
+from eval.answer_evaluator import evaluate_answer
 
 
 CONFIG_PATH = PROJECT_ROOT / "configs" / "llm.yaml"
@@ -63,8 +73,10 @@ def main() -> None:
 
     config_result = _load_config(CONFIG_PATH)
     config = config_result.get("config", {})
+    config = _apply_cli_overrides(config, parsed_args)
     mode = config.get("local_llm", {}).get("mode", "prompt_only") if isinstance(config, dict) else "prompt_only"
     context_policy = config.get("context_policy", {}) if isinstance(config, dict) else {}
+    compact_prompt = bool(parsed_args.get("compact_prompt"))
 
     context_pack = load_context_pack(str(CONTEXT_MD_PATH), str(CONTEXT_JSON_PATH))
     if config_result.get("status") != "ok":
@@ -81,7 +93,7 @@ def main() -> None:
 
     repair_context = eval_case.get("repair_context") if isinstance(eval_case, dict) else None
     if isinstance(repair_context, dict):
-        prompt = build_validation_repair_prompt(
+        prompt = _build_repair_prompt(
             user_question=user_question,
             context_pack=context_pack,
             validation_warnings=repair_context.get("warnings", []),
@@ -89,9 +101,16 @@ def main() -> None:
             original_answer=repair_context.get("original_answer"),
             missing_required_terms=repair_context.get("missing_required_terms", []),
             forbidden_hits=repair_context.get("forbidden_hits", []),
+            compact_prompt=compact_prompt,
         )
     else:
-        prompt = build_answer_prompt(user_question, context_pack, config, eval_case=eval_case)
+        prompt = _build_answer_prompt(
+            user_question=user_question,
+            context_pack=context_pack,
+            config=config,
+            eval_case=eval_case,
+            compact_prompt=compact_prompt,
+        )
 
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     _write_utf8_markdown(PROMPT_OUTPUT_PATH, prompt)
@@ -144,25 +163,39 @@ def main() -> None:
                 *guarded["notes"],
             ]
 
-    answer_path = None
-    archive_paths = {}
-    answer_validation = validate_answer_text(
+    first_result = result
+    first_answer_validation = _build_answer_validation(
         result.get("answer") or "",
         user_question=user_question,
         context_json=context_pack.get("context_json", {}),
+        eval_case=eval_case,
     )
+    final_answer_validation = first_answer_validation
+    repair_used = False
+    repair_success = False
+    first_prompt = prompt
+    answer_path = None
+    archive_paths = {}
+
     if (
         mode == "local_http"
         and result.get("status") == "ok"
-        and answer_validation.get("status") == "warning"
+        and _validation_needs_repair(first_answer_validation)
     ):
-        repair_prompt = build_validation_repair_prompt(
+        repair_used = True
+        repair_prompt = _build_repair_prompt(
             user_question=user_question,
             context_pack=context_pack,
-            validation_warnings=answer_validation.get("warnings", []),
-            eval_case=eval_case,
+            validation_warnings=first_answer_validation.get("warnings", []),
+            eval_case=_case_with_repair_context(
+                eval_case,
+                result.get("answer") or "",
+                first_answer_validation,
+            ),
             original_answer=result.get("answer"),
-            forbidden_hits=[],
+            missing_required_terms=first_answer_validation.get("missing_required_terms", []),
+            forbidden_hits=first_answer_validation.get("forbidden_hits", []),
+            compact_prompt=compact_prompt,
         )
         _write_utf8_markdown(PROMPT_OUTPUT_PATH, repair_prompt)
         retry_result = call_local_llm(repair_prompt, config)
@@ -178,15 +211,16 @@ def main() -> None:
                 *guarded["notes"],
             ]
             retry_result["cleaning_notes"] = retry_notes
-            retry_validation = validate_answer_text(
+            retry_validation = _build_answer_validation(
                 retry_result.get("answer") or "",
                 user_question=user_question,
                 context_json=context_pack.get("context_json", {}),
+                eval_case=eval_case,
             )
-            if retry_validation.get("status") != "warning":
-                result = retry_result
-                answer_validation = retry_validation
-                prompt = repair_prompt
+            result = retry_result
+            final_answer_validation = retry_validation
+            repair_success = _validation_is_pass(retry_validation)
+            prompt = repair_prompt
 
     if mode == "prompt_only":
         print(f"Prompt saved to: {PROMPT_OUTPUT_PATH}")
@@ -233,7 +267,7 @@ def main() -> None:
             result=result,
             config=config,
             context_health=context_health,
-            answer_validation=answer_validation,
+            answer_validation=final_answer_validation,
         )
 
     summary = {
@@ -248,9 +282,18 @@ def main() -> None:
         "ollama_health": ollama_health,
         "data_limitation_count": len(context_pack.get("data_limitations", [])),
         "data_limitations": context_pack.get("compressed_data_limitations", []),
+        "compact_prompt": compact_prompt,
+        "first_removed_thinking": first_result.get("removed_thinking", False),
+        "final_removed_thinking": result.get("removed_thinking", False),
         "removed_thinking": result.get("removed_thinking", False),
         "cleaning_notes": result.get("cleaning_notes", []),
-        "answer_validation": answer_validation,
+        "first_answer_validation": first_answer_validation,
+        "final_answer_validation": final_answer_validation,
+        "answer_validation": final_answer_validation,
+        "repair_used": repair_used,
+        "repair_success": repair_success,
+        "first_prompt_chars": len(first_prompt),
+        "final_prompt_chars": len(prompt),
     }
     if eval_case:
         summary["eval_case_id"] = eval_case.get("id")
@@ -266,6 +309,8 @@ def main() -> None:
 def _parse_cli_args(args: list[str]) -> dict[str, Any]:
     question_parts = []
     eval_case = None
+    overrides: dict[str, Any] = {}
+    compact_prompt = False
     index = 0
     while index < len(args):
         item = args[index]
@@ -281,6 +326,31 @@ def _parse_cli_args(args: list[str]) -> dict[str, Any]:
             eval_case = parsed
             index += 2
             continue
+        if item == "--model":
+            if index + 1 >= len(args):
+                raise SystemExit("--model requires a value.")
+            overrides["model"] = args[index + 1]
+            index += 2
+            continue
+        if item == "--num-ctx":
+            if index + 1 >= len(args):
+                raise SystemExit("--num-ctx requires a value.")
+            overrides["num_ctx"] = _parse_positive_int(args[index + 1], "--num-ctx")
+            index += 2
+            continue
+        if item == "--max-context-chars":
+            if index + 1 >= len(args):
+                raise SystemExit("--max-context-chars requires a value.")
+            overrides["max_context_chars"] = _parse_positive_int(
+                args[index + 1],
+                "--max-context-chars",
+            )
+            index += 2
+            continue
+        if item in {"--compact-prompt", "--compact-context"}:
+            compact_prompt = True
+            index += 1
+            continue
         question_parts.append(item)
         index += 1
 
@@ -288,7 +358,164 @@ def _parse_cli_args(args: list[str]) -> dict[str, Any]:
     return {
         "question": question,
         "eval_case": eval_case,
+        "overrides": overrides,
+        "compact_prompt": compact_prompt,
     }
+
+
+def _parse_positive_int(value: str, flag_name: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise SystemExit(f"{flag_name} must be an integer.") from exc
+    if parsed <= 0:
+        raise SystemExit(f"{flag_name} must be positive.")
+    return parsed
+
+
+def _apply_cli_overrides(config: dict[str, Any], parsed_args: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(config, dict):
+        config = _default_config()
+    overrides = parsed_args.get("overrides", {})
+    if not isinstance(overrides, dict) or not overrides:
+        return config
+
+    local_llm = config.setdefault("local_llm", {})
+    if not isinstance(local_llm, dict):
+        local_llm = {}
+        config["local_llm"] = local_llm
+
+    for key in ("model", "num_ctx", "max_context_chars"):
+        if key in overrides:
+            local_llm[key] = overrides[key]
+    return config
+
+
+def _build_answer_prompt(
+    user_question: str,
+    context_pack: dict[str, Any],
+    config: dict[str, Any],
+    eval_case: dict[str, Any] | None,
+    compact_prompt: bool,
+) -> str:
+    if compact_prompt:
+        return build_compact_answer_prompt(
+            user_question,
+            context_pack,
+            config,
+            eval_case=eval_case,
+        )
+    return build_answer_prompt(user_question, context_pack, config, eval_case=eval_case)
+
+
+def _build_repair_prompt(
+    user_question: str,
+    context_pack: dict[str, Any],
+    validation_warnings: list[str],
+    eval_case: dict[str, Any] | None,
+    original_answer: str | None,
+    missing_required_terms: list[str],
+    forbidden_hits: list[str],
+    compact_prompt: bool,
+) -> str:
+    if compact_prompt:
+        return build_compact_repair_prompt(
+            user_question=user_question,
+            context_pack=context_pack,
+            validation_warnings=validation_warnings,
+            eval_case=eval_case,
+            original_answer=original_answer,
+            missing_required_terms=missing_required_terms,
+            forbidden_hits=forbidden_hits,
+        )
+    return build_validation_repair_prompt(
+        user_question=user_question,
+        context_pack=context_pack,
+        validation_warnings=validation_warnings,
+        eval_case=eval_case,
+        original_answer=original_answer,
+        missing_required_terms=missing_required_terms,
+        forbidden_hits=forbidden_hits,
+    )
+
+
+def _build_answer_validation(
+    answer: str,
+    user_question: str,
+    context_json: dict[str, Any],
+    eval_case: dict[str, Any] | None,
+) -> dict[str, Any]:
+    guardrail = validate_answer_text(
+        answer,
+        user_question=user_question,
+        context_json=context_json,
+    )
+    evaluator = evaluate_answer(answer, eval_case) if isinstance(eval_case, dict) else None
+
+    warnings = list(guardrail.get("warnings", []))
+    forbidden_hits: list[str] = []
+    missing_required_terms: list[str] = []
+    status = "pass"
+
+    if guardrail.get("status") == "warning":
+        status = "warning"
+
+    if isinstance(evaluator, dict):
+        forbidden_hits = list(evaluator.get("forbidden_hits", []))
+        missing_required_terms = _missing_required_terms_list(evaluator)
+        if evaluator.get("warnings"):
+            warnings.extend(str(item) for item in evaluator.get("warnings", []))
+        if evaluator.get("status") == "fail":
+            status = "fail"
+        elif evaluator.get("status") == "warning" and status == "pass":
+            status = "warning"
+
+    if not answer.strip():
+        status = "fail"
+
+    return {
+        "status": status,
+        "warnings": _dedupe_strings(warnings),
+        "missing_required_terms": missing_required_terms,
+        "forbidden_hits": forbidden_hits,
+        "guardrail_validation": guardrail,
+        "evaluator": evaluator,
+    }
+
+
+def _validation_needs_repair(validation: dict[str, Any]) -> bool:
+    return validation.get("status") in {"fail", "warning"}
+
+
+def _validation_is_pass(validation: dict[str, Any]) -> bool:
+    return validation.get("status") == "pass"
+
+
+def _case_with_repair_context(
+    eval_case: dict[str, Any] | None,
+    original_answer: str,
+    validation: dict[str, Any],
+) -> dict[str, Any] | None:
+    if not isinstance(eval_case, dict):
+        return None
+    return {
+        **eval_case,
+        "repair_context": {
+            "evaluator_status": validation.get("status"),
+            "original_answer": original_answer,
+            "missing_required_terms": validation.get("missing_required_terms", []),
+            "forbidden_hits": validation.get("forbidden_hits", []),
+            "warnings": validation.get("warnings", []),
+        },
+    }
+
+
+def _missing_required_terms_list(result: dict[str, Any]) -> list[str]:
+    missing = []
+    for check in result.get("required_checks", []):
+        if check.get("status") == "fail":
+            missing.append("/".join(str(term) for term in check.get("terms_any", [])))
+    return missing
 
 
 def _read_user_question(args: list[str]) -> str:
