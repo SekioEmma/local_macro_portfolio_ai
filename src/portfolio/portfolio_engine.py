@@ -226,6 +226,7 @@ def generate_portfolio_snapshot(
 
     aggregated = aggregate_by_asset_class(holdings)
     totals = calculate_total_assets(aggregated)
+    holdings_freshness = summarize_holdings_updated_at(holdings)
     weights_ex_cash = calculate_weights(aggregated, include_cash=False)
     rounded_target_allocation = {
         asset_class: _round_weight(float(weight))
@@ -240,6 +241,7 @@ def generate_portfolio_snapshot(
         monthly_budget_min=float(user["monthly_budget_min"]),
         monthly_budget_max=float(user["monthly_budget_max"]),
     )
+    dca_daily_plan = build_dca_daily_plan(daily_plan, profile)
 
     return {
         "total_assets": totals["total_assets"],
@@ -249,12 +251,17 @@ def generate_portfolio_snapshot(
         "invested_asset_value": totals["invested_asset_value"],
         "cash_reserve_value": totals["cash_reserve_value"],
         "total_profit_loss": totals["total_profit_loss"],
+        "holdings_updated_at": holdings_freshness["holdings_updated_at"],
+        "holdings_updated_at_status": holdings_freshness["holdings_updated_at_status"],
+        "holdings_updated_at_values": holdings_freshness["holdings_updated_at_values"],
+        "holdings_row_count": holdings_freshness["holdings_row_count"],
         "aggregated_by_asset_class": aggregated,
         "weights_ex_cash": weights_ex_cash,
         "target_allocation": rounded_target_allocation,
         "deviation": deviation,
         "deviation_flags": deviation_flags,
         "dca_budget_check": dca_budget_check,
+        "dca_daily_plan": dca_daily_plan,
         "notes": [
             "This snapshot is descriptive only and does not include investment advice.",
             "Cash is treated as cash reserve and excluded from target-allocation weights by default.",
@@ -263,6 +270,48 @@ def generate_portfolio_snapshot(
             "Deviation is calculated as current weight minus target weight.",
         ],
     }
+
+
+def summarize_holdings_updated_at(holdings: list[dict]) -> dict:
+    values = sorted(
+        {
+            str(holding.get("updated_at", "")).strip()
+            for holding in holdings
+            if str(holding.get("updated_at", "")).strip()
+        }
+    )
+    status = "missing"
+    if len(values) == 1:
+        status = "consistent"
+    elif len(values) > 1:
+        status = "mixed"
+
+    return {
+        "holdings_updated_at": values[-1] if values else None,
+        "holdings_updated_at_status": status,
+        "holdings_updated_at_values": values,
+        "holdings_row_count": len(holdings),
+    }
+
+
+def build_dca_daily_plan(daily_plan: dict, profile: dict) -> dict:
+    known_funds = profile.get("known_funds", {})
+    if not isinstance(known_funds, dict):
+        known_funds = {}
+
+    result = {}
+    for key, raw_amount in daily_plan.items():
+        amount = _to_float(raw_amount, f"daily_plan.{key}")
+        fund_info = known_funds.get(str(key), {})
+        if not isinstance(fund_info, dict):
+            fund_info = {}
+        result[str(key)] = {
+            "daily_amount": _round_money(amount),
+            "status": "active_dca" if amount > 0 else "paused",
+            "asset_class": fund_info.get("asset_class") or str(key),
+            "name": fund_info.get("name"),
+        }
+    return result
 
 
 def _classify_single_deviation(value: float, threshold: float) -> str:

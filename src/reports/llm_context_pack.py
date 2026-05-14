@@ -222,11 +222,16 @@ def render_llm_context_markdown(context_pack: dict) -> str:
         "",
         "## 3. Portfolio Context",
         "",
-        "Cash is excluded from target allocation weights by default.",
+        "Cash is treated as cash reserve and excluded from target allocation weights by default.",
+        f"Holdings snapshot updated_at: {_display(portfolio.get('holdings_updated_at'))}",
         "",
         _allocation_table(portfolio),
         "",
         _dca_table(portfolio.get("dca_budget_check", {})),
+        "",
+        "DCA daily plan details:",
+        "",
+        _dca_daily_plan_table(portfolio.get("dca_daily_plan", {})),
         "",
         "## 4. Rule-based Assessments",
         "",
@@ -284,7 +289,22 @@ def _build_confirmed_facts(portfolio_snapshot: dict, market_snapshot: dict) -> d
             "total_assets": portfolio_snapshot.get("total_assets"),
             "invested_assets": portfolio_snapshot.get("invested_assets"),
             "cash": portfolio_snapshot.get("cash"),
+            "total_account_value": portfolio_snapshot.get(
+                "total_account_value",
+                portfolio_snapshot.get("total_assets"),
+            ),
+            "invested_asset_value": portfolio_snapshot.get(
+                "invested_asset_value",
+                portfolio_snapshot.get("invested_assets"),
+            ),
+            "cash_reserve_value": portfolio_snapshot.get(
+                "cash_reserve_value",
+                portfolio_snapshot.get("cash"),
+            ),
             "total_profit_loss": portfolio_snapshot.get("total_profit_loss"),
+            "holdings_updated_at": portfolio_snapshot.get("holdings_updated_at"),
+            "holdings_updated_at_status": portfolio_snapshot.get("holdings_updated_at_status"),
+            "holdings_row_count": portfolio_snapshot.get("holdings_row_count"),
             "holdings_source": portfolio_snapshot.get("holdings_source", {}),
         },
     }
@@ -467,10 +487,14 @@ def _build_portfolio_context(portfolio_snapshot: dict) -> dict:
         "deviation": portfolio_snapshot.get("deviation", {}),
         "deviation_flags": portfolio_snapshot.get("deviation_flags", {}),
         "dca_budget_check": portfolio_snapshot.get("dca_budget_check", {}),
+        "dca_daily_plan": portfolio_snapshot.get("dca_daily_plan", {}),
+        "holdings_updated_at": portfolio_snapshot.get("holdings_updated_at"),
+        "holdings_updated_at_status": portfolio_snapshot.get("holdings_updated_at_status"),
         "holdings_source": portfolio_snapshot.get("holdings_source", {}),
         "notes": [
             "Allowed descriptive terms include underweight, overweight, and DCA monthly budget status.",
-            "Cash is excluded from target allocation weights.",
+            "Cash is treated as cash reserve and excluded from target allocation weights.",
+            "Cash reserve can be a DCA deduction source; it is not a target investment asset.",
             "Do not output buy/sell commands, precise trading instructions, or return guarantees.",
         ],
     }
@@ -533,6 +557,11 @@ def _build_data_limitations(
         limitations.append("Portfolio data is sample fallback, not the user's real account.")
     if holdings_source.get("warning"):
         limitations.append(str(holdings_source["warning"]))
+    if portfolio_snapshot.get("holdings_updated_at_status") == "mixed":
+        limitations.append(
+            "holdings rows have mixed updated_at values: "
+            f"{portfolio_snapshot.get('holdings_updated_at_values', [])}"
+        )
 
     if market_snapshot.get("status") not in {None, "ok"} and market_snapshot.get("error"):
         limitations.append(f"market_snapshot: {market_snapshot.get('error')}")
@@ -647,9 +676,16 @@ def _account_facts_table(portfolio_facts: dict) -> str:
             ["total_assets", _format_number(portfolio_facts.get("total_assets"))],
             ["invested_assets", _format_number(portfolio_facts.get("invested_assets"))],
             ["cash", _format_number(portfolio_facts.get("cash"))],
+            ["total_account_value", _format_number(portfolio_facts.get("total_account_value"))],
+            ["invested_asset_value", _format_number(portfolio_facts.get("invested_asset_value"))],
+            ["cash_reserve_value", _format_number(portfolio_facts.get("cash_reserve_value"))],
             ["total_profit_loss", _format_number(portfolio_facts.get("total_profit_loss"))],
+            ["holdings_updated_at", portfolio_facts.get("holdings_updated_at")],
+            ["holdings_updated_at_status", portfolio_facts.get("holdings_updated_at_status")],
+            ["holdings_row_count", _format_number(portfolio_facts.get("holdings_row_count"))],
             ["holdings_source.mode", holdings_source.get("mode")],
             ["holdings_source.warning", holdings_source.get("warning")],
+            ["holdings_source.cash_reserve_note", holdings_source.get("cash_reserve_note")],
         ],
     )
 
@@ -681,9 +717,30 @@ def _dca_table(dca: dict) -> str:
             ["monthly_required", _format_number(dca.get("monthly_required"))],
             ["budget_min", _format_number(dca.get("budget_min"))],
             ["budget_max", _format_number(dca.get("budget_max"))],
+            ["trading_days", _format_number(dca.get("trading_days"))],
             ["status", dca.get("status")],
         ],
     )
+
+
+def _dca_daily_plan_table(dca_daily_plan: dict) -> str:
+    if not isinstance(dca_daily_plan, dict) or not dca_daily_plan:
+        return "No DCA daily plan recorded."
+
+    rows = []
+    for key, item in dca_daily_plan.items():
+        if not isinstance(item, dict):
+            continue
+        rows.append(
+            [
+                key,
+                item.get("name"),
+                item.get("asset_class"),
+                _format_number(item.get("daily_amount")),
+                item.get("status"),
+            ]
+        )
+    return _markdown_table(["Key", "Name", "Asset class", "Daily amount", "Status"], rows)
 
 
 def _assessment_table(assessments: dict) -> str:

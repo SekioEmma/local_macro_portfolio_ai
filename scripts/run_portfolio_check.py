@@ -47,7 +47,9 @@ def _select_holdings_file() -> tuple[Path, dict]:
             ),
             "cash_reserve_note": (
                 "asset_class=cash is treated as cash reserve and DCA deduction source; "
-                "it is excluded from target-allocation weights."
+                "it is excluded from target-allocation weights. Current cash reserve may "
+                "already reflect this month's transfer and several trading-day deductions; "
+                "do not treat it as remaining monthly contribution amount."
             ),
         }
 

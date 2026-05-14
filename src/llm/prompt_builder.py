@@ -803,6 +803,7 @@ def build_critical_facts_section(context_pack: dict[str, Any]) -> str:
         f"- total_account_value including cash: {_format_number(_portfolio_value(context_json, 'total_account_value', 'total_assets'))}",
         f"- invested_asset_value excluding cash: {_format_number(_portfolio_value(context_json, 'invested_asset_value', 'invested_assets'))}",
         f"- cash_reserve_value: {_format_number(_portfolio_value(context_json, 'cash_reserve_value', 'cash'))}",
+        f"- holdings_updated_at: {_display(_portfolio_value(context_json, 'holdings_updated_at', 'holdings_updated_at'))}",
         "- cash reserve rule: asset_class=cash / 余额宝 is a cash reserve and DCA deduction source; it is excluded from target-allocation weights.",
     ]
 

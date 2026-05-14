@@ -76,6 +76,9 @@ def build_daily_report_json(
                 portfolio_snapshot.get("cash"),
             ),
             "total_profit_loss": portfolio_snapshot.get("total_profit_loss"),
+            "holdings_updated_at": portfolio_snapshot.get("holdings_updated_at"),
+            "holdings_updated_at_status": portfolio_snapshot.get("holdings_updated_at_status"),
+            "holdings_row_count": portfolio_snapshot.get("holdings_row_count"),
             "cash_reserve_note": (
                 "Cash reserve is excluded from target-allocation weights and can be "
                 "the DCA deduction source."
@@ -99,6 +102,7 @@ def build_daily_report_json(
                 "status",
             ),
         ),
+        "dca_daily_plan": portfolio_snapshot.get("dca_daily_plan", {}),
         "market_summary": market_summary,
         "temperature_summary": temperature_summary,
         "data_sources": _extract_data_sources(market_snapshot, market_temperature),
@@ -140,6 +144,9 @@ def render_daily_report_markdown(report: dict) -> str:
                     _format_number(report["account_summary"].get("cash_reserve_value")),
                 ],
                 ["Total profit/loss", _format_number(report["account_summary"].get("total_profit_loss"))],
+                ["Holdings snapshot updated_at", _display(report["account_summary"].get("holdings_updated_at"))],
+                ["Holdings updated_at status", _display(report["account_summary"].get("holdings_updated_at_status"))],
+                ["Holdings row count", _format_number(report["account_summary"].get("holdings_row_count"))],
                 ["Cash reserve note", _display(report["account_summary"].get("cash_reserve_note"))],
                 ["Holdings source mode", _display(report.get("holdings_source", {}).get("mode"))],
                 ["Holdings source path", _display(report.get("holdings_source", {}).get("path"))],
@@ -170,6 +177,8 @@ def render_daily_report_markdown(report: dict) -> str:
                 ["Status", _display(report["dca_budget_summary"].get("status"))],
             ],
         ),
+        "",
+        _dca_daily_plan_table(report.get("dca_daily_plan", {})),
         "",
         "## 4. Market Snapshot",
         "",
@@ -292,6 +301,12 @@ def _build_data_limitations(
     ).get("used_cache"):
         limitations.append(
             "cache used: market_snapshot includes stale cache because required core live fetch failed."
+        )
+
+    if portfolio_snapshot.get("holdings_updated_at_status") == "mixed":
+        limitations.append(
+            "holdings rows have mixed updated_at values: "
+            f"{portfolio_snapshot.get('holdings_updated_at_values', [])}"
         )
 
     for section in ("market_data", "macro_data", "fx_data"):
@@ -562,6 +577,36 @@ def _allocation_table(allocation_summary: dict) -> str:
     return _markdown_table(
         ["Asset class", "Current ex-cash", "Target", "Deviation", "Flag"],
         rows,
+    )
+
+
+def _dca_daily_plan_table(dca_daily_plan: dict) -> str:
+    if not isinstance(dca_daily_plan, dict) or not dca_daily_plan:
+        return "No DCA daily plan recorded."
+
+    rows = []
+    for key, item in dca_daily_plan.items():
+        if not isinstance(item, dict):
+            continue
+        rows.append(
+            [
+                key,
+                _display(item.get("name")),
+                _display(item.get("asset_class")),
+                _format_number(item.get("daily_amount")),
+                _display(item.get("status")),
+            ]
+        )
+
+    return "\n".join(
+        [
+            "DCA daily plan details:",
+            "",
+            _markdown_table(
+                ["Key", "Name", "Asset class", "Daily amount", "Status"],
+                rows,
+            ),
+        ]
     )
 
 

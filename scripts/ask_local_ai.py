@@ -976,6 +976,7 @@ def _build_context_only_safe_answer(context_json: dict[str, Any], user_question:
     deviations = portfolio.get("deviation", {})
     flags = portfolio.get("deviation_flags", {})
     dca = portfolio.get("dca_budget_check", {})
+    holdings_updated_at = _portfolio_confirmed_value(context_json, "holdings_updated_at")
 
     lines = [
         "## 核心结论",
@@ -985,7 +986,7 @@ def _build_context_only_safe_answer(context_json: dict[str, Any], user_question:
         f"- equity_temperature: {_display(_level_value(market_temperature.get('equity_temperature')))}",
         f"- overall_regime: {_display(market_temperature.get('overall_regime'))}",
         f"- risk_level: {_display(market_temperature.get('risk_level'))} / 中等风险水平",
-        "- 数据来源：用户本地 current_holdings.csv 快照，手动录入且不保证实时。",
+        f"- 数据来源：用户本地 current_holdings.csv 快照，持仓日期 {_display(holdings_updated_at)}，手动录入且不保证实时。",
         "- 余额宝/cash：现金准备金和扣款来源，不纳入目标仓位计算，也不等于应立即投入的闲置资金。",
         "",
         "## 对组合的含义",
@@ -1030,6 +1031,16 @@ def _level_value(value: Any) -> Any:
     return value
 
 
+def _portfolio_confirmed_value(context_json: dict[str, Any], key: str) -> Any:
+    confirmed = context_json.get("confirmed_facts", {})
+    if not isinstance(confirmed, dict):
+        return None
+    portfolio = confirmed.get("portfolio", {})
+    if not isinstance(portfolio, dict):
+        return None
+    return portfolio.get(key)
+
+
 def _build_required_portfolio_facts_appendix(
     context_json: dict[str, Any],
     user_question: str,
@@ -1054,11 +1065,12 @@ def _build_required_portfolio_facts_appendix(
     deviations = portfolio.get("deviation", {})
     flags = portfolio.get("deviation_flags", {})
     dca = portfolio.get("dca_budget_check", {})
+    holdings_updated_at = _portfolio_confirmed_value(context_json, "holdings_updated_at")
 
     lines = [
         "## 组合关键事实（本地快照）",
         "以下只描述仓位偏离，作为后续定投和年度/阈值再平衡的观察方向，不是买卖指令。",
-        "- 数据来源：用户本地 current_holdings.csv 快照，手动录入且不保证实时。",
+        f"- 数据来源：用户本地 current_holdings.csv 快照，持仓日期 {_display(holdings_updated_at)}，手动录入且不保证实时。",
         "- 余额宝/cash：现金准备金和扣款来源，不纳入目标仓位计算，也不等于应立即投入的闲置资金。",
     ]
     for asset in ("sp500", "nasdaq100", "short_bond", "gold"):
