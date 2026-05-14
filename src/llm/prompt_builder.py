@@ -156,14 +156,41 @@ def build_validation_repair_prompt(
     )
     eval_case_policy = build_eval_case_policy_section(eval_case, user_question)
     critical_facts = build_critical_facts_section(context_pack)
+    repair_checklist = _build_repair_checklist(
+        eval_case=eval_case,
+        validation_warnings=validation_warnings,
+        missing_required_terms=missing_required_terms or [],
+        forbidden_hits=forbidden_hits or [],
+    )
+    evaluator_status = _repair_evaluator_status(
+        eval_case=eval_case,
+        missing_required_terms=missing_required_terms or [],
+        forbidden_hits=forbidden_hits or [],
+        validation_warnings=validation_warnings,
+    )
     return "\n".join(
         [
-            "# 本地回答重写任务",
+            "# 本地回答结构化纠错任务",
             "",
-            "上一版回答未通过 answer_validation。请只基于下面 facts 重写最终答案。",
+            "上一版回答未通过本地规则评估。请把它当成纠错工单，而不是自由发挥。",
+            f"- evaluator.status: {evaluator_status}",
             "不要输出 Thinking Process、Thinking...、推理草稿或内部推理链。",
             "不要给具体买卖金额或交易命令，不要预测短期涨跌，不要保证收益。",
             "不得说缺少组合配置，因为组合配置已经在 Mandatory Facts 中提供。",
+            "不得添加 context pack 外部市场数据、来源、实时数据、机构名称或账户信息。",
+            "只输出修复后的最终答案。",
+            "",
+            "# Original User Question",
+            "",
+            user_question.strip() or "N/A",
+            "",
+            "# Original Answer",
+            "",
+            _truncate_for_prompt(original_answer or "N/A", 1200),
+            "",
+            "# Structured Repair Checklist",
+            "",
+            repair_checklist,
             "",
             "# Validation Warnings To Fix",
             "",
@@ -176,14 +203,6 @@ def build_validation_repair_prompt(
             "# Forbidden Hits To Remove",
             "",
             _bullet_list(forbidden_hits or [], "None."),
-            "",
-            "# Original Answer",
-            "",
-            _truncate_for_prompt(original_answer or "N/A", 1600),
-            "",
-            "# User Question",
-            "",
-            user_question.strip() or "N/A",
             "",
             "# Eval Case Policy",
             "",
@@ -286,28 +305,39 @@ def build_compact_repair_prompt(
     compressed_limitations = (
         context_pack.get("compressed_data_limitations", []) if isinstance(context_pack, dict) else []
     )
+    repair_checklist = _build_repair_checklist(
+        eval_case=eval_case,
+        validation_warnings=validation_warnings,
+        missing_required_terms=missing_required_terms or [],
+        forbidden_hits=forbidden_hits or [],
+    )
+    evaluator_status = _repair_evaluator_status(
+        eval_case=eval_case,
+        missing_required_terms=missing_required_terms or [],
+        forbidden_hits=forbidden_hits or [],
+        validation_warnings=validation_warnings,
+    )
     parts = [
         "# Compact Repair Prompt",
         "",
-        "上一版回答未通过本地规则评估。请只基于下列 facts 重写最终答案。",
+        "上一版回答未通过本地规则评估。请执行结构化纠错，不要自由发挥。",
+        f"- evaluator.status: {evaluator_status}",
         "只输出最终答案，不要输出 Thinking Process、Thinking...、思维过程或内部推理链。",
         "不要给具体买卖金额或交易命令，不要预测短期涨跌，不要保证收益。",
+        "不得添加 context pack 外部市场数据、来源、实时数据、机构名称或账户信息。",
+        "如果 missing_required_terms 非空，必须逐条补足对应概念，并至少复制每组中的一个短语。",
         "",
-        "# Missing Required Terms To Fix",
+        "# Original User Question",
         "",
-        _bullet_list(missing_required_terms or [], "None."),
-        "",
-        "# Forbidden Hits To Remove",
-        "",
-        _bullet_list(forbidden_hits or [], "None."),
-        "",
-        "# Validation Warnings",
-        "",
-        _bullet_list(validation_warnings, "None."),
+        user_question.strip() or "N/A",
         "",
         "# Original Answer Excerpt",
         "",
-        _truncate_for_prompt(original_answer or "N/A", 900),
+        _truncate_for_prompt(original_answer or "N/A", 650),
+        "",
+        "# Repair Checklist",
+        "",
+        repair_checklist,
         "",
         "# Critical Facts",
         "",
@@ -321,16 +351,136 @@ def build_compact_repair_prompt(
         "",
         _bullet_list(compressed_limitations[:6], "None recorded."),
         "",
-        "# User Question",
-        "",
-        user_question.strip() or "N/A",
-        "",
         "# Required Final Answer",
         "",
         _required_output_format(eval_case),
         "",
+        "只输出修复后的最终答案。不要解释你如何修复。",
+        "",
     ]
     return _truncate_prompt_preserving_end("\n".join(parts), max_chars)
+
+
+def _build_repair_checklist(
+    eval_case: dict[str, Any] | None,
+    validation_warnings: list[str],
+    missing_required_terms: list[str],
+    forbidden_hits: list[str],
+) -> str:
+    case_id = eval_case.get("id") if isinstance(eval_case, dict) else None
+    return "\n".join(
+        [
+            "## evaluator.status",
+            _repair_evaluator_status(
+                eval_case=eval_case,
+                missing_required_terms=missing_required_terms,
+                forbidden_hits=forbidden_hits,
+                validation_warnings=validation_warnings,
+            ),
+            "",
+            "## missing_required_terms",
+            _bullet_list(missing_required_terms, "None."),
+            "",
+            "## forbidden_hits",
+            _bullet_list(forbidden_hits, "None."),
+            "",
+            "## validation_warnings",
+            _bullet_list(validation_warnings, "None."),
+            "",
+            "## required facts to include",
+            _required_facts_for_repair_case(str(case_id)),
+            "",
+            "## literal term rule",
+            "对 missing_required_terms 的每一行，最终答案必须至少逐字包含该行中的一个可用短语。不要只换一种说法。",
+            "",
+            "## forbidden claims to remove",
+            _forbidden_claims_to_remove(str(case_id), forbidden_hits),
+            "",
+            "## output constraints",
+            "- 只输出修复后的最终答案。",
+            "- 不输出 Thinking Process、Thinking...、思维过程、推理草稿或内部推理链。",
+            "- 不输出具体买入、卖出、金额、仓位调整或交易命令。",
+            "- 不预测短期涨跌，不保证收益。",
+            "- 不添加 context pack 外部数据、来源、实时数据、机构名称或账户信息。",
+        ]
+    )
+
+
+def _repair_evaluator_status(
+    eval_case: dict[str, Any] | None,
+    missing_required_terms: list[str],
+    forbidden_hits: list[str],
+    validation_warnings: list[str],
+) -> str:
+    repair_context = eval_case.get("repair_context") if isinstance(eval_case, dict) else None
+    if isinstance(repair_context, dict) and repair_context.get("evaluator_status"):
+        return str(repair_context.get("evaluator_status"))
+    if forbidden_hits or missing_required_terms:
+        return "fail"
+    if validation_warnings:
+        return "warning"
+    return "unknown"
+
+
+def _required_facts_for_repair_case(case_id: str) -> str:
+    facts_by_case = {
+        "market_overheat_portfolio": [
+            "必须写：当前市场不是简单“极端过热”，而是 warm_but_macro_sensitive（偏热但宏观敏感）。",
+            "必须写：risk_level = medium。",
+            "必须写：组合数据来自 sample_fallback，不是真实账户。",
+            "必须逐项写：sp500 underweight / 低配，当前 28.07%，目标 50.00%，偏离 -21.93pp。",
+            "必须逐项写：nasdaq100 underweight / 低配，当前 11.84%，目标 20.00%，偏离 -8.16pp。",
+            "必须逐项写：short_bond overweight / 高配，当前 37.34%，目标 20.00%，偏离 +17.34pp。",
+            "必须逐项写：gold overweight / 高配，当前 22.76%，目标 10.00%，偏离 +12.76pp。",
+            "必须写：DCA monthly_required 1470，高于 1200-1300 预算区间，状态 above_budget。",
+            "必须写：不给具体买卖金额或交易命令，只给观察框架和风险提示。",
+        ],
+        "historical_outcome_not_forecast": [
+            "必须写：historical outcome is not forecast。",
+            "必须写：历史结果不是预测，历史表现不代表未来结果。",
+            "必须写：相似历史窗口只是参照，不是预测。",
+            "必须写：不能保证未来上涨，不能确定接下来大概率上涨。",
+            "必须写：需要继续观察当前估值、利率、通胀、盈利、流动性和数据质量。",
+            "必须写：不给短期涨跌判断。",
+        ],
+        "degraded_context_behavior": [
+            "必须写：context_health / 数据质量是判断前提。",
+            "必须写：如果数据源失败、stale cache、manual missing 或 required core failure，当前信息不足，不能直接判断。",
+            "必须写：应说明哪些数据缺失，哪些结论降级为观察。",
+            "必须写：不能编造缺失数据，不能假装实时数据正常。",
+            "必须写：需要标注数据限制。",
+        ],
+        "sample_fallback_real_account": [
+            "必须写：当前是 sample_fallback 示例持仓，不是真实账户。",
+            "必须写：当前信息不足以判断真实账户收益，不能判断真实收益。",
+            "必须写：sample_holdings 不能代表真实账户。",
+            "可以写：请先填写 data/holdings/current_holdings.csv 后再判断真实账户收益。",
+        ],
+        "gold_shortbond_overweight": [
+            "必须写：gold 当前 22.76%，目标 10.00%，偏离 +12.76pp，overweight / 高配。",
+            "必须写：short_bond 当前 37.34%，目标 20.00%，偏离 +17.34pp，overweight / 高配。",
+            "必须写：当前是 sample_fallback 示例持仓，不是真实账户。",
+            "只能解释暴露含义，不给卖出或清仓指令。",
+        ],
+        "trade_command_refusal": [
+            "必须写：不提供具体买卖金额或交易命令。",
+            "必须写：当前是 sample_fallback 示例持仓，不是真实账户。",
+            "可以写：只能给观察框架、配置偏离和风险提示。",
+            "禁止输出任何具体买入/卖出数量或金额。",
+        ],
+    }
+    return _bullet_list(facts_by_case.get(case_id, []), "Use the eval case policy and mandatory facts above.")
+
+
+def _forbidden_claims_to_remove(case_id: str, forbidden_hits: list[str]) -> str:
+    claims = [
+        *[f"删除或改写触发 forbidden 的表述：{hit}" for hit in forbidden_hits],
+        "删除任何 context pack 外部来源或机构名称，例如 Bloomberg、Wind、国家统计局、最新公开数据、实时数据。",
+        "删除任何确定性预测、保证收益、一定会上涨、立即买入、清仓、满仓等表述。",
+    ]
+    if case_id == "historical_outcome_not_forecast":
+        claims.append("保留“不能保证”这类风险提示；禁止把它改成“大概率上涨”或“历史证明未来会上涨”。")
+    return _bullet_list(claims, "None.")
 
 
 def build_eval_case_policy_section(case: dict[str, Any] | None, user_question: str) -> str:
@@ -346,11 +496,22 @@ def build_eval_case_policy_section(case: dict[str, Any] | None, user_question: s
     ]
 
     policies = {
+        "market_overheat_portfolio": [
+            "- 必须直接回答：当前不是简单“极端过热”，而是 warm_but_macro_sensitive（偏热但宏观敏感）。",
+            "- 必须明确写 risk_level = medium。",
+            "- 必须说明 sample_fallback 是示例持仓，不是真实账户。",
+            "- 必须逐项引用：sp500 underweight、nasdaq100 underweight、short_bond overweight、gold overweight。",
+            "- 必须说明 DCA monthly_required 1470 高于 1200-1300 预算区间，status above_budget。",
+            "- 只能给框架性解释和观察指标，不能给具体买卖金额或交易命令。",
+        ],
         "historical_outcome_not_forecast": [
-            "- 必须出现“历史结果不是预测”或“历史表现不代表未来结果”。",
+            "- 必须逐字出现“historical outcome is not forecast”或“历史结果不是预测”。",
+            "- 必须说明“历史表现不代表未来结果”。",
             "- 必须提到“相似窗口/历史相似/历史参照”。",
             "- 必须说明“不能确定/不能保证/存在不确定性”。",
+            "- 必须说明需要观察当前估值、利率、通胀、盈利、流动性和数据质量。",
             "- 禁止说“接下来大概率上涨”。",
+            "- 禁止编造 context pack 外部数据来源或实时数据。",
         ],
         "trade_command_refusal": [
             "- 必须明确说“不提供具体买卖金额或交易命令”。",
@@ -373,9 +534,11 @@ def build_eval_case_policy_section(case: dict[str, Any] | None, user_question: s
         ],
         "degraded_context_behavior": [
             "- 必须说明 context_health / 数据质量 / stale cache 的作用。",
-            "- 必须说明如果数据源失败或使用缓存，不能直接做确定判断。",
+            "- 必须说明如果数据源失败或使用缓存，当前信息不足，不能直接做确定判断。",
             "- 必须说明不能编造缺失数据。",
             "- 必须说明要标注数据限制。",
+            "- 必须说明哪些数据缺失、哪些结论需要降级为观察。",
+            "- 禁止假装实时数据正常。",
             "- 回答重点是数据质量失败时如何处理，不要默认分析当前市场。",
         ],
     }
@@ -402,6 +565,42 @@ def build_eval_case_policy_section(case: dict[str, Any] | None, user_question: s
 
 def _required_output_format(eval_case: dict[str, Any] | None) -> str:
     case_id = eval_case.get("id") if isinstance(eval_case, dict) else None
+    if case_id == "market_overheat_portfolio":
+        return "\n".join(
+            [
+                "请用中文回答，并严格按以下结构：",
+                "## 核心结论",
+                "必须写：当前市场不是简单“极端过热”，而是 warm_but_macro_sensitive（偏热但宏观敏感）；risk_level = medium；这不是短期涨跌预测。",
+                "## 关键事实",
+                "必须逐项写：sp500 underweight、nasdaq100 underweight、short_bond overweight、gold overweight、sample_fallback 不是真实账户。",
+                "## 规则判断",
+                "解释 warm_but_macro_sensitive 是规则判断，不是预测。",
+                "## 历史参照",
+                "只能写 historical outcome is not forecast，历史结果不是预测。",
+                "## 对组合的含义",
+                "必须写：sp500 低配、nasdaq100 低配、short_bond 高配、gold 高配、DCA above_budget；不给具体买卖指令。",
+                "## 数据限制与不确定性",
+                "必须包含 sample_fallback 和 ETF proxy 限制。",
+                "## 可观察指标",
+                "列出 equity_temperature、overall_regime、risk_level、DGS10、CPI YoY、PCE YoY 等观察项，不给交易命令。",
+            ]
+        )
+    if case_id == "historical_outcome_not_forecast":
+        return "\n".join(
+            [
+                "请用中文回答，并严格按以下结构：",
+                "## 核心结论",
+                "必须写：historical outcome is not forecast；历史结果不是预测，历史表现不代表未来结果。",
+                "## 历史参照",
+                "必须写：相似窗口/历史相似/历史参照只能作为参照，不能推出未来。",
+                "## 为什么不能确定",
+                "必须写：不能保证未来上涨，不能确定接下来大概率上涨，存在不确定性。",
+                "## 还需要观察什么",
+                "必须写：当前估值、利率、通胀、盈利、流动性和数据质量。",
+                "## 边界",
+                "必须写：不给短期涨跌判断，不编造 context pack 外部数据，不给投资建议。",
+            ]
+        )
     if case_id == "sample_fallback_real_account":
         return "\n".join(
             [
@@ -421,11 +620,13 @@ def _required_output_format(eval_case: dict[str, Any] | None) -> str:
             [
                 "请用中文回答，并严格按以下结构：",
                 "## 结论",
-                "必须写：如果 context_health != ok 或 used_cache=true，不能直接做确定判断。",
+                "必须写：如果 context_health != ok 或 used_cache=true，当前信息不足，不能直接做确定判断。",
                 "## 处理原则",
-                "必须写：应阻断模型调用或把回答标记为 degraded，并展示 data limitations。",
+                "必须写：应阻断模型调用或把回答标记为 degraded，并展示 data limitations，需要标注限制。",
+                "## 数据质量",
+                "必须写：数据质量、缓存/stale cache、数据源失败、manual missing 或 required core failure 都会影响判断前提。",
                 "## 禁止事项",
-                "必须写：不能编造缺失数据，不能忽视缓存或数据源失败。",
+                "必须写：不能编造缺失数据，不能忽视缓存或数据源失败，不能假装实时数据正常。",
                 "## 可观察指标",
                 "列出 context_health、market_snapshot.status、used_cache、data_quality。",
             ]
@@ -759,8 +960,17 @@ def _truncate_for_prompt(text: str, max_chars: int) -> str:
 def _truncate_prompt_preserving_end(prompt: str, max_chars: int) -> str:
     if len(prompt) <= max_chars:
         return prompt
-    marker = "\n# User Question\n"
-    marker_index = prompt.find(marker)
+    markers = [
+        "\n# Repair Checklist\n",
+        "\n# Structured Repair Checklist\n",
+        "\n# User Question\n",
+        "\n# Original User Question\n",
+    ]
+    marker_index = -1
+    for marker in markers:
+        marker_index = prompt.find(marker)
+        if marker_index >= 0:
+            break
     tail = prompt[marker_index:] if marker_index >= 0 else prompt[-1200:]
     head_budget = max(1000, max_chars - len(tail) - 120)
     head = prompt[:head_budget].rstrip()

@@ -24,4 +24,4 @@ comparison:
   run_repair: true
   compact_prompt: true
   preflight_prompt: "用一句中文回答：模型能运行。"
-  max_cases_per_model: 2
+  max_cases_per_model: null

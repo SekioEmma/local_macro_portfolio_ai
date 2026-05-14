@@ -120,6 +120,10 @@ def _run_case(case: dict[str, Any], eval_dir: Path) -> dict[str, Any]:
                 "first_eval_result": first_eval_result,
                 "final_eval_result": final_eval_result,
                 "eval_result": final_eval_result,
+                "missing_required_terms": _missing_required_terms_list(first_eval_result),
+                "forbidden_hits": first_eval_result.get("forbidden_hits", []),
+                "final_missing_required_terms": _missing_required_terms_list(final_eval_result),
+                "final_forbidden_hits": final_eval_result.get("forbidden_hits", []),
                 "first_ask_returncode": first_completed.returncode,
                 "first_ask_stdout_preview": first_completed.stdout[-1200:],
                 "first_ask_stderr_preview": first_completed.stderr[-1200:],
@@ -204,6 +208,7 @@ def _case_with_repair_context(
     return {
         **case,
         "repair_context": {
+            "evaluator_status": eval_result.get("status"),
             "original_answer": original_answer,
             "missing_required_terms": _missing_required_terms_list(eval_result),
             "forbidden_hits": eval_result.get("forbidden_hits", []),

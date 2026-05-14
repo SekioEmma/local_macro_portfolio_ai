@@ -369,6 +369,69 @@
 - 不提交 outputs/model_eval 真实结果
 - 不把 historical outcome 写成 forecast
 
+### 阶段 5.4：完整本地模型比较与默认模型选择
+
+已完成：
+- 完整 6-case local model comparison
+- 比较 gemma4:e2b 与 qwen3:4b
+- 记录 first-pass 与 final-pass 表现
+- 记录 repair 依赖
+- 记录 Thinking 清理结果
+- 记录模型运行错误
+
+gemma4:e2b 结果：
+- preflight_status: ok
+- total_cases: 6
+- first_pass_pass_rate: 0.6667
+- final_pass_rate: 0.6667
+- repair_used_count: 2
+- repair_success_count: 0
+- average_first_score: 89.17
+- average_final_score: 90.5
+- failed_case_ids: market_overheat_portfolio, historical_outcome_not_forecast
+- no thinking residue
+- no model_errors
+
+qwen3:4b 结果：
+- preflight_status: ok
+- total_cases: 6
+- first_pass_pass_rate: 0.5
+- final_pass_rate: 0.5
+- repair_used_count: 3
+- repair_success_count: 0
+- average_first_score: 88.0
+- average_final_score: 89.17
+- failed_case_ids: market_overheat_portfolio, historical_outcome_not_forecast, degraded_context_behavior
+- no thinking residue
+- no model_errors
+
+默认模型选择结论：
+- 不切换默认模型
+- 继续使用 gemma4:e2b
+- qwen3:4b 暂不切换，保留为候选模型
+- 当前主要瓶颈不是模型加载，也不是 Thinking 清理
+- 当前主要瓶颈是 compact prompt / repair 对失败 case 的纠错能力不足
+
+下一步重点：
+- 进入 repair effectiveness improvement
+- 优先修复 repair_success_count=0
+- 重点 case: market_overheat_portfolio
+- 重点 case: historical_outcome_not_forecast
+
+已明确限制：
+- 不接 OpenAI API
+- 不接云端 API
+- 不训练模型
+- 不微调模型
+- 不写具体买卖建议
+- 不预测短期涨跌
+- 不修改 .env
+- 不提交 outputs/eval 真实评估结果
+- 不提交 outputs/answers 真实问答记录
+- 不提交 outputs/model_eval 真实结果
+- 不提交 latest_llm_prompt.md / latest_llm_answer.md
+- 不把 historical outcome 写成 forecast
+
 ## 当前技术原则
 
 - 事实数据来自 provider
@@ -398,6 +461,6 @@
 
 ## 下一阶段计划
 
-阶段 5.4：待规划。
+阶段 5.5：repair effectiveness improvement。
 
-阶段 5.3 已完成本地模型对比与 repair 依赖评估。下一阶段仍需遵守不接云端 API、不训练模型、不预测未来、不写投资建议的边界。
+阶段 5.4 已完成完整本地模型比较与默认模型选择。下一阶段优先提升 compact prompt / repair 对失败 case 的纠错能力，同时仍需遵守不接云端 API、不训练模型、不预测未来、不写投资建议的边界。

@@ -251,6 +251,8 @@ def _run_case(
     final_result = first_result
     final_guardrail_notes = first_guardrail_notes
     final_eval_result = first_eval_result
+    repair_input = None
+    repair_prompt_summary = None
 
     if (
         not model_error
@@ -259,16 +261,27 @@ def _run_case(
         and run_repair
     ):
         repair_used = True
+        missing_required_terms = _missing_required_terms_list(first_eval_result)
+        forbidden_hits = first_eval_result.get("forbidden_hits", [])
         repair_case = _case_with_repair_context(case, first_answer, first_eval_result)
+        repair_input = {
+            "question": question,
+            "evaluator_status": first_eval_result.get("status"),
+            "missing_required_terms": missing_required_terms,
+            "forbidden_hits": forbidden_hits,
+            "warnings": first_eval_result.get("warnings", []),
+            "original_answer_excerpt": first_answer[:800],
+        }
         repair_prompt = _build_repair_prompt(
             question=question,
             context_pack=prompt_context,
             validation_warnings=first_eval_result.get("warnings", []),
             repair_case=repair_case,
             original_answer=first_answer,
-            missing_required_terms=_missing_required_terms_list(first_eval_result),
+            missing_required_terms=missing_required_terms,
             compact_prompt=compact_prompt,
         )
+        repair_prompt_summary = _repair_prompt_summary(repair_prompt, repair_input)
         final_result = call_local_llm(_with_no_think(repair_prompt, no_think_hint), llm_config)
         final_answer, final_guardrail_notes = _answer_from_llm_result(final_result, context_pack)
         model_error = _llm_result_to_model_error(final_result)
@@ -294,6 +307,26 @@ def _run_case(
         "final_eval_result": final_eval_result,
         "repair_used": repair_used,
         "repair_success": repair_success,
+        "repair_input": repair_input,
+        "repair_prompt_summary": repair_prompt_summary,
+        "missing_required_terms": _missing_required_terms_list(first_eval_result),
+        "forbidden_hits": first_eval_result.get("forbidden_hits", []),
+        "final_missing_required_terms": _missing_required_terms_list(final_eval_result),
+        "final_forbidden_hits": final_eval_result.get("forbidden_hits", []),
+        "repair_success_reason": _repair_result_reason(
+            repair_used=repair_used,
+            repair_success=repair_success,
+            final_eval_result=final_eval_result,
+        )
+        if repair_success
+        else None,
+        "repair_failure_reason": _repair_result_reason(
+            repair_used=repair_used,
+            repair_success=repair_success,
+            final_eval_result=final_eval_result,
+        )
+        if repair_used and not repair_success
+        else None,
         "first_llm_status": first_result.get("status"),
         "final_llm_status": final_result.get("status"),
         "first_removed_thinking": first_result.get("removed_thinking", False),
@@ -393,6 +426,45 @@ def _build_repair_prompt(
         missing_required_terms=missing_required_terms,
         forbidden_hits=repair_case.get("repair_context", {}).get("forbidden_hits", []),
     )
+
+
+def _repair_prompt_summary(
+    repair_prompt: str,
+    repair_input: dict[str, Any] | None,
+) -> dict[str, Any]:
+    return {
+        "prompt_chars": len(repair_prompt),
+        "has_repair_checklist": "# Repair Checklist" in repair_prompt
+        or "# Structured Repair Checklist" in repair_prompt,
+        "has_original_question": "# Original User Question" in repair_prompt,
+        "has_original_answer_excerpt": "# Original Answer" in repair_prompt,
+        "has_missing_required_terms": "missing_required_terms" in repair_prompt
+        or "Missing Required Terms" in repair_prompt,
+        "has_forbidden_hits": "forbidden_hits" in repair_prompt
+        or "Forbidden Hits" in repair_prompt,
+        "repair_input": repair_input,
+    }
+
+
+def _repair_result_reason(
+    repair_used: bool,
+    repair_success: bool,
+    final_eval_result: dict[str, Any],
+) -> str | None:
+    if not repair_used:
+        return None
+    if repair_success:
+        return "final_eval_result passed after structured repair."
+    missing = _missing_required_terms_list(final_eval_result)
+    forbidden = final_eval_result.get("forbidden_hits", [])
+    parts = []
+    if missing:
+        parts.append("still missing required terms: " + "; ".join(missing))
+    if forbidden:
+        parts.append("still has forbidden hits: " + "; ".join(str(item) for item in forbidden))
+    if final_eval_result.get("warnings"):
+        parts.append("warnings: " + "; ".join(str(item) for item in final_eval_result.get("warnings", [])))
+    return " | ".join(parts) if parts else "final_eval_result did not pass."
 
 
 def _context_with_llm_config(
@@ -554,6 +626,7 @@ def _case_with_repair_context(
     return {
         **case,
         "repair_context": {
+            "evaluator_status": eval_result.get("status"),
             "original_answer": original_answer,
             "missing_required_terms": _missing_required_terms_list(eval_result),
             "forbidden_hits": eval_result.get("forbidden_hits", []),
