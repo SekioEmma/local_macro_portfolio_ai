@@ -432,6 +432,46 @@ qwen3:4b 结果：
 - 不提交 latest_llm_prompt.md / latest_llm_answer.md
 - 不把 historical outcome 写成 forecast
 
+### 阶段 5.7：默认本地模型切换到 qwen3:4b
+
+已完成：
+- configs/llm.yaml 默认模型从 gemma4:e2b 切换为 qwen3:4b
+- 默认 Ollama provider 与本机 endpoint 保持不变
+- 默认 num_ctx 调整为 2048
+- 默认 max_context_chars 调整为 5000
+- 默认 compact_prompt=true
+- strip_thinking_output 继续保持 true
+- gemma4:e2b 保留为备用模型
+
+切换依据：
+- 阶段 5.6 使用真实 scripts/ask_local_ai.py 主链路验证
+- gemma4:e2b: total_questions=5, passed=4, failed=1, pass_rate=0.8
+- gemma4:e2b failed case: market_overheat_portfolio
+- qwen3:4b: total_questions=5, passed=5, failed=0, pass_rate=1.0
+- qwen3:4b thinking_residue_count=0
+- latest_llm_answer.md 未残留 Thinking Process / Thinking... / done thinking
+
+重要限制：
+- qwen3:4b 在阶段 5.6 中没有触发 repair
+- 因此只能说明 qwen3:4b 在真实 ask_local_ai first-pass 主链路中更稳
+- 不能声称 qwen3:4b repair 已在真实 ask_local_ai 主链路中被证明有效
+- 仍需保留 clean_model_answer / strip_thinking_output
+- 仍需保留 context pack only、禁止预测、禁止具体交易指令、禁止编造数据等边界
+
+已明确限制：
+- 不接 OpenAI API
+- 不接云端 API
+- 不训练模型
+- 不微调模型
+- 不写具体买卖建议
+- 不预测短期涨跌
+- 不修改 .env
+- 不提交 outputs/eval 真实评估结果
+- 不提交 outputs/answers 真实问答记录
+- 不提交 outputs/model_eval 真实结果
+- 不提交 latest_llm_prompt.md / latest_llm_answer.md
+- 不把 historical outcome 写成 forecast
+
 ## 当前技术原则
 
 - 事实数据来自 provider
@@ -439,7 +479,8 @@ qwen3:4b 结果：
 - 市场温度由规则模型计算
 - 本地 LLM 问答接口只能读取 llm_context_pack
 - 默认 local_http 调用本机 Ollama
-- 默认模型为 gemma4:e2b
+- 默认模型为 qwen3:4b
+- gemma4:e2b 保留为备用模型
 - local_http 只允许本机 endpoint，不接云端 API
 - degraded context 默认阻断模型调用
 - LLM 不能编造数据
@@ -461,6 +502,6 @@ qwen3:4b 结果：
 
 ## 下一阶段计划
 
-阶段 5.5：repair effectiveness improvement。
+阶段 5.8：默认 qwen3:4b 后的上下文压缩与主链路稳定性优化。
 
-阶段 5.4 已完成完整本地模型比较与默认模型选择。下一阶段优先提升 compact prompt / repair 对失败 case 的纠错能力，同时仍需遵守不接云端 API、不训练模型、不预测未来、不写投资建议的边界。
+阶段 5.7 已完成默认模型切换。下一阶段优先观察默认 qwen3:4b 在真实主链路中的稳定性，并继续优化 context compression、repair 触发与 evaluator 规则，同时仍需遵守不接云端 API、不训练模型、不预测未来、不写投资建议的边界。

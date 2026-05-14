@@ -9,10 +9,10 @@
         ["sample_fallback", "不是真实账户", "示例持仓"],
         ["sp500", "标普"],
         ["nasdaq100", "纳斯达克"],
-        ["short_bond", "短债"],
+        ["short_bond", "短债", "短期债券", "债券"],
         ["gold", "黄金"],
-        ["underweight", "低配", "欠配", "低于目标", "偏离-"],
-        ["overweight", "高配", "超配", "高于目标", "偏离+"]
+        ["underweight", "低配", "欠配", "低于目标", "相对目标偏低", "偏离-"],
+        ["overweight", "高配", "超配", "高于目标", "相对目标偏高", "偏离+"]
       ],
       "forbidden_terms": [
         "保证收益",
@@ -90,7 +90,7 @@
       "category": "portfolio_exposure",
       "required_terms_any": [
         ["gold", "黄金"],
-        ["short_bond", "短债"],
+        ["short_bond", "短债", "短期债券", "债券"],
         ["overweight", "高配"],
         ["sample_fallback", "不是真实账户", "示例持仓"]
       ],

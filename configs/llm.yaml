@@ -1,19 +1,21 @@
 # gemma4:e4b and gemma4:e4b-lowctx currently fail on this Windows + RTX 4060
 # Laptop 8GB VRAM + 16GB RAM environment with:
 # memory layout cannot be allocated
-# gemma4:e2b has passed the basic Chinese smoke test:
+# gemma4:e2b has passed the basic Chinese smoke test and remains a fallback:
 # ollama run gemma4:e2b "用一句中文回答：你能正常运行吗？"
-# Stage 5.1 uses gemma4:e2b to validate the local_http pipeline first.
+# Stage 5.7 switches the default local model to qwen3:4b after ask_local_ai
+# main-chain validation. Keep strip_thinking_output enabled for both models.
 local_llm:
   mode: "local_http"
   provider: "ollama"
   endpoint: "http://localhost:11434/api/generate"
-  model: "gemma4:e2b"
+  model: "qwen3:4b"
   timeout_seconds: 240
   temperature: 0.1
   top_p: 0.9
-  num_ctx: 4096
-  max_context_chars: 16000
+  num_ctx: 2048
+  max_context_chars: 5000
+  compact_prompt: true
   save_answer_archive: true
   strip_thinking_output: true
 

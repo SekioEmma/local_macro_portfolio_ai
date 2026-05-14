@@ -49,6 +49,13 @@ FORBIDDEN_ANSWER_PATTERNS = [
     "一定会涨",
     "明天会涨",
     "立即买入",
+    "应买入",
+    "应卖出",
+    "立即调整",
+    "需增加持仓",
+    "需增加配置",
+    "需减持",
+    "需减少配置",
     "满仓",
     "清仓",
 ]
@@ -76,7 +83,8 @@ def main() -> None:
     config = _apply_cli_overrides(config, parsed_args)
     mode = config.get("local_llm", {}).get("mode", "prompt_only") if isinstance(config, dict) else "prompt_only"
     context_policy = config.get("context_policy", {}) if isinstance(config, dict) else {}
-    compact_prompt = bool(parsed_args.get("compact_prompt"))
+    local_llm_config = config.get("local_llm", {}) if isinstance(config, dict) else {}
+    compact_prompt = bool(parsed_args.get("compact_prompt") or local_llm_config.get("compact_prompt", False))
 
     context_pack = load_context_pack(str(CONTEXT_MD_PATH), str(CONTEXT_JSON_PATH))
     if config_result.get("status") != "ok":
@@ -655,6 +663,9 @@ def validate_answer_text(
         if pattern in answer:
             warnings.append(f"Forbidden phrase detected: {pattern}")
 
+    if "风险水平" in answer and "中性" in answer:
+        warnings.append("risk_level=medium should be described as 中等 or medium, not 中性.")
+
     amount_patterns = [
         r"买入\s*[\d,]+(?:\.\d+)?\s*(?:元|人民币|块)",
         r"卖出\s*[\d,]+(?:\.\d+)?\s*(?:元|人民币|块)",
@@ -686,10 +697,17 @@ def validate_answer_text(
             "nasdaq100",
             "short_bond",
             "gold",
+            "标普",
+            "纳斯达克",
+            "短债",
+            "短期债券",
+            "黄金",
             "underweight",
             "overweight",
             "低配",
             "高配",
+            "相对目标偏低",
+            "相对目标偏高",
         ]
         if not any(keyword in answer_lower or keyword in answer for keyword in portfolio_keywords):
             warnings.append("Answer does not reference portfolio allocation facts.")

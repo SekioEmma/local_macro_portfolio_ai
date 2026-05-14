@@ -256,6 +256,11 @@ def build_compact_answer_prompt(
         "- 不得把 historical outcome 写成 forecast；historical outcome is not forecast。",
         "- 不得预测短期涨跌，不得保证收益。",
         "- 不得给具体买入、卖出、金额、仓位调整或交易命令。",
+        "- 不得使用交易指令化措辞：需增加持仓、需增加配置、需减持、需减少配置、应买入、应卖出、立即调整。",
+        "- 组合偏离必须用字面词：低配/高配、相对目标偏低/相对目标偏高，作为后续定投和再平衡时的观察方向。",
+        "- 不要写“配置不足/配置过剩”，请改写为“低配/高配”或“相对目标偏低/相对目标偏高”。",
+        "- 对高配资产可以写“避免继续主动加仓”或“等待年度/阈值再平衡评估”，不要写需减持。",
+        "- risk_level=medium 必须表达为“中等”“medium”或“中等风险水平”，不要写成“中性”。",
         "- 不得把 ETF proxy 当成真实基金净值。",
         "- 不得把 sample_fallback 当成真实账户。",
         "",
@@ -324,6 +329,10 @@ def build_compact_repair_prompt(
         f"- evaluator.status: {evaluator_status}",
         "只输出最终答案，不要输出 Thinking Process、Thinking...、思维过程或内部推理链。",
         "不要给具体买卖金额或交易命令，不要预测短期涨跌，不要保证收益。",
+        "不要使用：需增加持仓、需增加配置、需减持、需减少配置、应买入、应卖出、立即调整。",
+        "请使用：低配/高配、相对目标偏低/相对目标偏高、后续定投和再平衡时作为观察方向、避免继续主动加仓、等待年度/阈值再平衡评估。",
+        "不要写“配置不足/配置过剩”，请改写为“低配/高配”或“相对目标偏低/相对目标偏高”。",
+        "risk_level=medium 必须写成中等或 medium，不要写中性。",
         "不得添加 context pack 外部市场数据、来源、实时数据、机构名称或账户信息。",
         "如果 missing_required_terms 非空，必须逐条补足对应概念，并至少复制每组中的一个短语。",
         "",
@@ -400,6 +409,10 @@ def _build_repair_checklist(
             "- 只输出修复后的最终答案。",
             "- 不输出 Thinking Process、Thinking...、思维过程、推理草稿或内部推理链。",
             "- 不输出具体买入、卖出、金额、仓位调整或交易命令。",
+            "- 不使用需增加持仓、需增加配置、需减持、需减少配置、应买入、应卖出、立即调整。",
+            "- 使用低配/高配、相对目标偏低/相对目标偏高、后续定投和再平衡观察方向。",
+            "- 不使用配置不足/配置过剩；改用低配/高配或相对目标偏低/相对目标偏高。",
+            "- risk_level=medium 写成中等、medium 或中等风险水平，不写中性。",
             "- 不预测短期涨跌，不保证收益。",
             "- 不添加 context pack 外部数据、来源、实时数据、机构名称或账户信息。",
         ]
@@ -426,12 +439,12 @@ def _required_facts_for_repair_case(case_id: str) -> str:
     facts_by_case = {
         "market_overheat_portfolio": [
             "必须写：当前市场不是简单“极端过热”，而是 warm_but_macro_sensitive（偏热但宏观敏感）。",
-            "必须写：risk_level = medium。",
+            "必须写：risk_level = medium，也就是中等风险水平，不是中性。",
             "必须写：组合数据来自 sample_fallback，不是真实账户。",
-            "必须逐项写：sp500 underweight / 低配，当前 28.07%，目标 50.00%，偏离 -21.93pp。",
-            "必须逐项写：nasdaq100 underweight / 低配，当前 11.84%，目标 20.00%，偏离 -8.16pp。",
-            "必须逐项写：short_bond overweight / 高配，当前 37.34%，目标 20.00%，偏离 +17.34pp。",
-            "必须逐项写：gold overweight / 高配，当前 22.76%，目标 10.00%，偏离 +12.76pp。",
+            "必须逐项写：sp500 underweight / 低配 / 相对目标偏低，当前 28.07%，目标 50.00%，偏离 -21.93pp；作为后续定投和再平衡观察方向，不写需增加持仓。",
+            "必须逐项写：nasdaq100 underweight / 低配 / 相对目标偏低，当前 11.84%，目标 20.00%，偏离 -8.16pp；作为后续定投和再平衡观察方向，不写需增加持仓。",
+            "必须逐项写：short_bond overweight / 高配 / 相对目标偏高，当前 37.34%，目标 20.00%，偏离 +17.34pp；可写等待年度/阈值再平衡评估，不写需减持。",
+            "必须逐项写：gold overweight / 高配 / 相对目标偏高，当前 22.76%，目标 10.00%，偏离 +12.76pp；可写避免继续主动加仓或等待年度/阈值再平衡评估，不写需减持。",
             "必须写：DCA monthly_required 1470，高于 1200-1300 预算区间，状态 above_budget。",
             "必须写：不给具体买卖金额或交易命令，只给观察框架和风险提示。",
         ],
@@ -477,6 +490,9 @@ def _forbidden_claims_to_remove(case_id: str, forbidden_hits: list[str]) -> str:
         *[f"删除或改写触发 forbidden 的表述：{hit}" for hit in forbidden_hits],
         "删除任何 context pack 外部来源或机构名称，例如 Bloomberg、Wind、国家统计局、最新公开数据、实时数据。",
         "删除任何确定性预测、保证收益、一定会上涨、立即买入、清仓、满仓等表述。",
+        "删除或改写交易指令化措辞：需增加持仓、需增加配置、需减持、需减少配置、应买入、应卖出、立即调整。",
+        "删除或改写风格不合规措辞：配置不足、配置过剩；改为低配/高配或相对目标偏低/相对目标偏高。",
+        "如果出现“风险水平：中性”，改为“风险水平：中等”或“risk_level=medium”。",
     ]
     if case_id == "historical_outcome_not_forecast":
         claims.append("保留“不能保证”这类风险提示；禁止把它改成“大概率上涨”或“历史证明未来会上涨”。")
@@ -498,11 +514,14 @@ def build_eval_case_policy_section(case: dict[str, Any] | None, user_question: s
     policies = {
         "market_overheat_portfolio": [
             "- 必须直接回答：当前不是简单“极端过热”，而是 warm_but_macro_sensitive（偏热但宏观敏感）。",
-            "- 必须明确写 risk_level = medium。",
+            "- 必须明确写 risk_level = medium / 中等风险水平，不要写中性。",
             "- 必须说明 sample_fallback 是示例持仓，不是真实账户。",
             "- 必须逐项引用：sp500 underweight、nasdaq100 underweight、short_bond overweight、gold overweight。",
             "- 必须说明 DCA monthly_required 1470 高于 1200-1300 预算区间，status above_budget。",
             "- 只能给框架性解释和观察指标，不能给具体买卖金额或交易命令。",
+            "- 用“低配/高配/相对目标偏低/相对目标偏高”和“后续定投和再平衡时作为观察方向”。",
+            "- 不使用“需增加持仓/需增加配置/需减持/需减少配置/应买入/应卖出/立即调整”。",
+            "- 不使用“配置不足/配置过剩”，改用“低配/高配/相对目标偏低/相对目标偏高”。",
         ],
         "historical_outcome_not_forecast": [
             "- 必须逐字出现“historical outcome is not forecast”或“历史结果不是预测”。",
@@ -570,19 +589,20 @@ def _required_output_format(eval_case: dict[str, Any] | None) -> str:
             [
                 "请用中文回答，并严格按以下结构：",
                 "## 核心结论",
-                "必须写：当前市场不是简单“极端过热”，而是 warm_but_macro_sensitive（偏热但宏观敏感）；risk_level = medium；这不是短期涨跌预测。",
+                "必须写：当前市场不是简单“极端过热”，而是 warm_but_macro_sensitive（偏热但宏观敏感）；risk_level = medium / 中等风险水平；这不是短期涨跌预测。",
                 "## 关键事实",
-                "必须逐项写：sp500 underweight、nasdaq100 underweight、short_bond overweight、gold overweight、sample_fallback 不是真实账户。",
+                "必须逐项写：sp500 低配 / 相对目标偏低、nasdaq100 低配 / 相对目标偏低、short_bond 高配 / 相对目标偏高、gold 高配 / 相对目标偏高、sample_fallback 不是真实账户。",
                 "## 规则判断",
                 "解释 warm_but_macro_sensitive 是规则判断，不是预测。",
                 "## 历史参照",
                 "只能写 historical outcome is not forecast，历史结果不是预测。",
                 "## 对组合的含义",
-                "必须写：sp500 低配、nasdaq100 低配、short_bond 高配、gold 高配、DCA above_budget；不给具体买卖指令。",
+                "必须写：sp500 低配、nasdaq100 低配、short_bond 高配、gold 高配、DCA above_budget；这些只作为后续定投和再平衡观察方向，不给具体买卖指令。",
                 "## 数据限制与不确定性",
                 "必须包含 sample_fallback 和 ETF proxy 限制。",
                 "## 可观察指标",
                 "列出 equity_temperature、overall_regime、risk_level、DGS10、CPI YoY、PCE YoY 等观察项，不给交易命令。",
+                "禁止措辞：需增加持仓、需增加配置、需减持、需减少配置、应买入、应卖出、立即调整、配置不足、配置过剩；risk_level=medium 不得写成中性。",
             ]
         )
     if case_id == "historical_outcome_not_forecast":
@@ -653,7 +673,7 @@ def _required_output_format(eval_case: dict[str, Any] | None) -> str:
             "必须回答：当前更接近“偏热但宏观敏感”（warm_but_macro_sensitive），而不是无法判断；这不是短期涨跌预测。",
             "",
             "## 关键事实",
-            "必须至少列出：equity_temperature、overall_regime、risk_level、sp500 / nasdaq100 / short_bond / gold 的偏离方向、sample_fallback 警告。",
+            "必须至少列出：equity_temperature、overall_regime、risk_level（medium / 中等风险水平，不写中性）、sp500 / nasdaq100 / short_bond / gold 的偏离方向；偏离方向必须写低配/高配或相对目标偏低/相对目标偏高；sample_fallback 警告。",
             "",
             "## 规则判断",
             "解释 warm_but_macro_sensitive。必须说明这是规则判断，不是预测。",
@@ -662,13 +682,15 @@ def _required_output_format(eval_case: dict[str, Any] | None) -> str:
             "只能说 historical outcome is not forecast，不能把历史结果写成未来预测。",
             "",
             "## 对组合的含义",
-            "必须逐项引用：sp500 underweight、nasdaq100 underweight、short_bond overweight、gold overweight、DCA above_budget；不能给具体买卖指令。",
+            "必须逐项引用：sp500 underweight、nasdaq100 underweight、short_bond overweight、gold overweight、DCA above_budget；只能作为后续定投和再平衡观察方向，不能给具体买卖指令。",
             "",
             "## 数据限制与不确定性",
             "必须包含 sample_fallback 和 ETF proxy 限制。",
             "",
             "## 可观察指标",
             "列出可观察指标，不给交易命令。",
+            "",
+            "禁止措辞：需增加持仓、需增加配置、需减持、需减少配置、应买入、应卖出、立即调整、配置不足、配置过剩；risk_level=medium 不得写成中性。",
         ]
     )
 
@@ -694,7 +716,9 @@ def _build_mandatory_answer_facts(context_pack: dict[str, Any]) -> str:
         + f"{_level(market_temperature.get('equity_temperature'))}; "
         + f"overall_regime {_display(market_temperature.get('overall_regime'))}; "
         + f"risk_level {_display(market_temperature.get('risk_level'))}.",
+        "- Required risk wording: risk_level medium = 中等 / 中等风险水平, not 中性.",
         "- Required wording: 当前更接近“偏热但宏观敏感”（warm_but_macro_sensitive），这不是短期涨跌预测。",
+        "- Required allocation wording: use 低配/高配/相对目标偏低/相对目标偏高；use 后续定投和再平衡时作为观察方向；do not use 配置不足/配置过剩/需增加持仓/需减持/应买入/应卖出/立即调整.",
         f"- Portfolio data source: {_display(holdings_source.get('mode'))}, not real account.",
     ]
     for asset in ("sp500", "nasdaq100", "short_bond", "gold"):
@@ -703,7 +727,7 @@ def _build_mandatory_answer_facts(context_pack: dict[str, Any]) -> str:
             + f"{asset} current {_format_percent(weights.get(asset))}, "
             + f"target {_format_percent(targets.get(asset))}, "
             + f"deviation {_format_pp(deviations.get(asset))}, "
-            + f"{_display(flags.get(asset))}."
+            + f"{_display(flags.get(asset))} ({_allocation_label(flags.get(asset))})."
         )
     lines.append(
         "- Must cite: DCA monthly_required "
@@ -757,6 +781,7 @@ def build_critical_facts_section(context_pack: dict[str, Any]) -> str:
         f"- labor_market: {_level(market_temperature.get('labor_market'))}",
         f"- overall_regime: {_display(market_temperature.get('overall_regime'))}",
         f"- risk_level: {_display(market_temperature.get('risk_level'))}",
+        "- risk_level wording: medium means 中等 / 中等风险水平, not 中性.",
         f"- SP500 1m/3m change: {_history_return_line(history_features.get('spy'), label='SPY proxy for S&P 500')}",
         f"- NASDAQ 1m/3m change: {_history_return_line(history_features.get('qqq'), label='QQQ proxy for Nasdaq 100')}",
         f"- DGS10 latest: {_format_number(_nested(market_facts, ('dgs10', 'value')))}",
@@ -780,7 +805,7 @@ def build_critical_facts_section(context_pack: dict[str, Any]) -> str:
             + f"{asset}: current {_format_percent(weights.get(asset))}, "
             + f"target {_format_percent(targets.get(asset))}, "
             + f"deviation {_format_pp(deviations.get(asset))}, "
-            + f"flag {_display(flags.get(asset))}."
+            + f"flag {_display(flags.get(asset))} ({_allocation_label(flags.get(asset))})."
         )
 
     dca = portfolio.get("dca_budget_check", {}) if isinstance(portfolio, dict) else {}
@@ -1047,6 +1072,17 @@ def _format_yoy(value: Any) -> str:
         return f"{float(value):.2f}%"
     except (TypeError, ValueError):
         return str(value)
+
+
+def _allocation_label(flag: Any) -> str:
+    value = str(flag or "").lower()
+    if value == "underweight":
+        return "低配 / 相对目标偏低"
+    if value == "overweight":
+        return "高配 / 相对目标偏高"
+    if value == "within_range":
+        return "接近目标区间"
+    return "unavailable"
 
 
 def _display(value: Any) -> str:
