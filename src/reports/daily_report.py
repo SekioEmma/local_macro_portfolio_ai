@@ -63,7 +63,23 @@ def build_daily_report_json(
             "total_assets": portfolio_snapshot.get("total_assets"),
             "invested_assets": portfolio_snapshot.get("invested_assets"),
             "cash": portfolio_snapshot.get("cash"),
+            "total_account_value": portfolio_snapshot.get(
+                "total_account_value",
+                portfolio_snapshot.get("total_assets"),
+            ),
+            "invested_asset_value": portfolio_snapshot.get(
+                "invested_asset_value",
+                portfolio_snapshot.get("invested_assets"),
+            ),
+            "cash_reserve_value": portfolio_snapshot.get(
+                "cash_reserve_value",
+                portfolio_snapshot.get("cash"),
+            ),
             "total_profit_loss": portfolio_snapshot.get("total_profit_loss"),
+            "cash_reserve_note": (
+                "Cash reserve is excluded from target-allocation weights and can be "
+                "the DCA deduction source."
+            ),
         },
         "allocation_summary": {
             "weights_ex_cash": portfolio_snapshot.get("weights_ex_cash", {}),
@@ -74,7 +90,14 @@ def build_daily_report_json(
         },
         "dca_budget_summary": _copy_keys(
             portfolio_snapshot.get("dca_budget_check", {}),
-            ("daily_total", "monthly_required", "budget_min", "budget_max", "status"),
+            (
+                "daily_total",
+                "monthly_required",
+                "budget_min",
+                "budget_max",
+                "trading_days",
+                "status",
+            ),
         ),
         "market_summary": market_summary,
         "temperature_summary": temperature_summary,
@@ -104,13 +127,24 @@ def render_daily_report_markdown(report: dict) -> str:
         _markdown_table(
             ["Metric", "Value"],
             [
-                ["Total assets", _format_number(report["account_summary"].get("total_assets"))],
-                ["Invested assets", _format_number(report["account_summary"].get("invested_assets"))],
-                ["Cash", _format_number(report["account_summary"].get("cash"))],
+                [
+                    "Total account value including cash",
+                    _format_number(report["account_summary"].get("total_account_value")),
+                ],
+                [
+                    "Invested asset value excluding cash",
+                    _format_number(report["account_summary"].get("invested_asset_value")),
+                ],
+                [
+                    "Cash reserve value",
+                    _format_number(report["account_summary"].get("cash_reserve_value")),
+                ],
                 ["Total profit/loss", _format_number(report["account_summary"].get("total_profit_loss"))],
+                ["Cash reserve note", _display(report["account_summary"].get("cash_reserve_note"))],
                 ["Holdings source mode", _display(report.get("holdings_source", {}).get("mode"))],
                 ["Holdings source path", _display(report.get("holdings_source", {}).get("path"))],
                 ["Holdings source warning", _display(report.get("holdings_source", {}).get("warning"))],
+                ["Cash reserve source note", _display(report.get("holdings_source", {}).get("cash_reserve_note"))],
             ],
         ),
         "",
@@ -132,6 +166,7 @@ def render_daily_report_markdown(report: dict) -> str:
                 ["Monthly required", _format_number(report["dca_budget_summary"].get("monthly_required"))],
                 ["Budget min", _format_number(report["dca_budget_summary"].get("budget_min"))],
                 ["Budget max", _format_number(report["dca_budget_summary"].get("budget_max"))],
+                ["Trading days estimate", _format_number(report["dca_budget_summary"].get("trading_days"))],
                 ["Status", _display(report["dca_budget_summary"].get("status"))],
             ],
         ),

@@ -66,8 +66,11 @@ def build_answer_prompt(
             "- 不得把 ETF proxy 当成真实基金净值。",
             "- 不得把 sample_fallback 当成真实账户；sample_fallback is not real account data。",
             "- 不得编造 context pack 外部数据。",
+            "- 不得编造外部来源、实时更新时间、模型版本、规则库、Bloomberg/ISO 等来源或机构。",
+            "- 不得编造交易量、资金流入、波动率系数、风险评分、自动调仓次数或自动执行行为。",
             "- 不得声称保证收益。",
             "- 不得输出具体买入、卖出、仓位调整或交易指令。",
+            "- 不得把仓位偏离写成操作建议、推荐行动、补仓、减仓、逐步减持、增持、减持、转为某配置、持仓调整或具体调整方案。",
             "",
             "# Runtime Policy",
             "",
@@ -75,6 +78,8 @@ def build_answer_prompt(
             "- 如果 context pack 没有数据，直接说当前信息不足。",
             "- 如果账户还是 sample_fallback，必须说明当前不是真实账户。",
             "- 如果 holdings_source.mode=sample_fallback，必须在核心结论中明确写出：当前账户数据是示例持仓，不是真实账户。",
+            "- 如果 holdings_source.mode=current_holdings，必须说明组合数据来自用户本地 current_holdings.csv 快照，手动录入且不保证实时。",
+            "- 余额宝或 asset_class=cash 是现金准备金/扣款来源，不纳入目标仓位计算，也不要解释成应立即投资的闲置资金。",
             "- 回答“对组合意味着什么”时，必须使用 Portfolio Critical Facts。",
             "- 不得声称缺少组合配置，因为 Portfolio Critical Facts 已提供。",
             "- 判断“是否过热”时，必须使用 Market Critical Facts 中的 rule-based assessments：equity_temperature、rate_pressure、inflation_pressure、overall_regime、risk_level。",
@@ -253,10 +258,11 @@ def build_compact_answer_prompt(
         "# Forbidden Behaviors",
         "",
         "- 不得编造 context pack 外部市场数据、账户数据或来源。",
+        "- 不得编造外部来源、实时更新时间、模型版本、规则库、Bloomberg/ISO、交易量、资金流入、波动率系数、风险评分或自动调仓。",
         "- 不得把 historical outcome 写成 forecast；historical outcome is not forecast。",
         "- 不得预测短期涨跌，不得保证收益。",
         "- 不得给具体买入、卖出、金额、仓位调整或交易命令。",
-        "- 不得使用交易指令化措辞：需增加持仓、需增加配置、需减持、需减少配置、应买入、应卖出、立即调整。",
+        "- 不得使用交易指令化措辞：需增加持仓、需增加配置、需减持、需减少配置、应买入、应卖出、立即调整、逐步减持、增持、减持、操作建议、推荐行动、补仓、减仓、持仓调整、具体调整方案。",
         "- 组合偏离必须用字面词：低配/高配、相对目标偏低/相对目标偏高，作为后续定投和再平衡时的观察方向。",
         "- 不要写“配置不足/配置过剩”，请改写为“低配/高配”或“相对目标偏低/相对目标偏高”。",
         "- 对高配资产可以写“避免继续主动加仓”或“等待年度/阈值再平衡评估”，不要写需减持。",
@@ -329,11 +335,12 @@ def build_compact_repair_prompt(
         f"- evaluator.status: {evaluator_status}",
         "只输出最终答案，不要输出 Thinking Process、Thinking...、思维过程或内部推理链。",
         "不要给具体买卖金额或交易命令，不要预测短期涨跌，不要保证收益。",
-        "不要使用：需增加持仓、需增加配置、需减持、需减少配置、应买入、应卖出、立即调整。",
+        "不要使用：需增加持仓、需增加配置、需减持、需减少配置、应买入、应卖出、立即调整、逐步减持、增持、减持、操作建议、推荐行动、补仓、减仓、持仓调整、具体调整方案。",
         "请使用：低配/高配、相对目标偏低/相对目标偏高、后续定投和再平衡时作为观察方向、避免继续主动加仓、等待年度/阈值再平衡评估。",
         "不要写“配置不足/配置过剩”，请改写为“低配/高配”或“相对目标偏低/相对目标偏高”。",
         "risk_level=medium 必须写成中等或 medium，不要写中性。",
         "不得添加 context pack 外部市场数据、来源、实时数据、机构名称或账户信息。",
+        "不得添加外部来源、实时更新时间、模型版本、规则库、Bloomberg/ISO、交易量、资金流入、波动率系数、风险评分或自动调仓。",
         "如果 missing_required_terms 非空，必须逐条补足对应概念，并至少复制每组中的一个短语。",
         "",
         "# Original User Question",
@@ -409,12 +416,13 @@ def _build_repair_checklist(
             "- 只输出修复后的最终答案。",
             "- 不输出 Thinking Process、Thinking...、思维过程、推理草稿或内部推理链。",
             "- 不输出具体买入、卖出、金额、仓位调整或交易命令。",
-            "- 不使用需增加持仓、需增加配置、需减持、需减少配置、应买入、应卖出、立即调整。",
+            "- 不使用需增加持仓、需增加配置、需减持、需减少配置、应买入、应卖出、立即调整、逐步减持、增持、减持、操作建议、推荐行动、补仓、减仓、持仓调整、具体调整方案。",
             "- 使用低配/高配、相对目标偏低/相对目标偏高、后续定投和再平衡观察方向。",
             "- 不使用配置不足/配置过剩；改用低配/高配或相对目标偏低/相对目标偏高。",
             "- risk_level=medium 写成中等、medium 或中等风险水平，不写中性。",
             "- 不预测短期涨跌，不保证收益。",
             "- 不添加 context pack 外部数据、来源、实时数据、机构名称或账户信息。",
+            "- 不添加外部来源、实时更新时间、模型版本、规则库、Bloomberg/ISO、交易量、资金流入、波动率系数、风险评分或自动调仓。",
         ]
     )
 
@@ -490,7 +498,7 @@ def _forbidden_claims_to_remove(case_id: str, forbidden_hits: list[str]) -> str:
         *[f"删除或改写触发 forbidden 的表述：{hit}" for hit in forbidden_hits],
         "删除任何 context pack 外部来源或机构名称，例如 Bloomberg、Wind、国家统计局、最新公开数据、实时数据。",
         "删除任何确定性预测、保证收益、一定会上涨、立即买入、清仓、满仓等表述。",
-        "删除或改写交易指令化措辞：需增加持仓、需增加配置、需减持、需减少配置、应买入、应卖出、立即调整。",
+        "删除或改写交易指令化措辞：需增加持仓、需增加配置、需减持、需减少配置、应买入、应卖出、立即调整、逐步减持、增持、减持、操作建议、推荐行动、补仓、减仓、持仓调整、具体调整方案。",
         "删除或改写风格不合规措辞：配置不足、配置过剩；改为低配/高配或相对目标偏低/相对目标偏高。",
         "如果出现“风险水平：中性”，改为“风险水平：中等”或“risk_level=medium”。",
     ]
@@ -520,7 +528,7 @@ def build_eval_case_policy_section(case: dict[str, Any] | None, user_question: s
             "- 必须说明 DCA monthly_required 1470 高于 1200-1300 预算区间，status above_budget。",
             "- 只能给框架性解释和观察指标，不能给具体买卖金额或交易命令。",
             "- 用“低配/高配/相对目标偏低/相对目标偏高”和“后续定投和再平衡时作为观察方向”。",
-            "- 不使用“需增加持仓/需增加配置/需减持/需减少配置/应买入/应卖出/立即调整”。",
+            "- 不使用“需增加持仓/需增加配置/需减持/需减少配置/应买入/应卖出/立即调整/逐步减持/增持/减持/操作建议/推荐行动/补仓/减仓/持仓调整/具体调整方案”。",
             "- 不使用“配置不足/配置过剩”，改用“低配/高配/相对目标偏低/相对目标偏高”。",
         ],
         "historical_outcome_not_forecast": [
@@ -591,18 +599,18 @@ def _required_output_format(eval_case: dict[str, Any] | None) -> str:
                 "## 核心结论",
                 "必须写：当前市场不是简单“极端过热”，而是 warm_but_macro_sensitive（偏热但宏观敏感）；risk_level = medium / 中等风险水平；这不是短期涨跌预测。",
                 "## 关键事实",
-                "必须逐项写：sp500 低配 / 相对目标偏低、nasdaq100 低配 / 相对目标偏低、short_bond 高配 / 相对目标偏高、gold 高配 / 相对目标偏高、sample_fallback 不是真实账户。",
+                "必须逐项写：sp500 低配 / 相对目标偏低、nasdaq100 低配 / 相对目标偏低、short_bond 高配 / 相对目标偏高、gold 高配 / 相对目标偏高，并说明 holdings_source 数据来源。",
                 "## 规则判断",
                 "解释 warm_but_macro_sensitive 是规则判断，不是预测。",
                 "## 历史参照",
                 "只能写 historical outcome is not forecast，历史结果不是预测。",
                 "## 对组合的含义",
-                "必须写：sp500 低配、nasdaq100 低配、short_bond 高配、gold 高配、DCA above_budget；这些只作为后续定投和再平衡观察方向，不给具体买卖指令。",
+                "必须写：sp500 低配、nasdaq100 低配、short_bond 高配、gold 高配、DCA budget status；这些只作为后续定投和再平衡观察方向，不给具体买卖指令。",
                 "## 数据限制与不确定性",
-                "必须包含 sample_fallback 和 ETF proxy 限制。",
+                "必须包含 holdings_source 数据来源限制和 ETF proxy 限制；只有 holdings_source.mode=sample_fallback 时才写 sample_fallback 警告。",
                 "## 可观察指标",
                 "列出 equity_temperature、overall_regime、risk_level、DGS10、CPI YoY、PCE YoY 等观察项，不给交易命令。",
-                "禁止措辞：需增加持仓、需增加配置、需减持、需减少配置、应买入、应卖出、立即调整、配置不足、配置过剩；risk_level=medium 不得写成中性。",
+                "禁止措辞：需增加持仓、需增加配置、需减持、需减少配置、应买入、应卖出、立即调整、逐步减持、增持、减持、操作建议、推荐行动、补仓、减仓、持仓调整、具体调整方案、配置不足、配置过剩；risk_level=medium 不得写成中性。",
             ]
         )
     if case_id == "historical_outcome_not_forecast":
@@ -673,7 +681,7 @@ def _required_output_format(eval_case: dict[str, Any] | None) -> str:
             "必须回答：当前更接近“偏热但宏观敏感”（warm_but_macro_sensitive），而不是无法判断；这不是短期涨跌预测。",
             "",
             "## 关键事实",
-            "必须至少列出：equity_temperature、overall_regime、risk_level（medium / 中等风险水平，不写中性）、sp500 / nasdaq100 / short_bond / gold 的偏离方向；偏离方向必须写低配/高配或相对目标偏低/相对目标偏高；sample_fallback 警告。",
+            "必须至少列出：equity_temperature、overall_regime、risk_level（medium / 中等风险水平，不写中性）、sp500 / nasdaq100 / short_bond / gold 的偏离方向；偏离方向必须写低配/高配或相对目标偏低/相对目标偏高；holdings_source 数据来源说明。",
             "",
             "## 规则判断",
             "解释 warm_but_macro_sensitive。必须说明这是规则判断，不是预测。",
@@ -682,15 +690,15 @@ def _required_output_format(eval_case: dict[str, Any] | None) -> str:
             "只能说 historical outcome is not forecast，不能把历史结果写成未来预测。",
             "",
             "## 对组合的含义",
-            "必须逐项引用：sp500 underweight、nasdaq100 underweight、short_bond overweight、gold overweight、DCA above_budget；只能作为后续定投和再平衡观察方向，不能给具体买卖指令。",
+            "必须逐项引用：sp500 underweight、nasdaq100 underweight、short_bond overweight、gold overweight、DCA budget status；只能作为后续定投和再平衡观察方向，不能给具体买卖指令。",
             "",
             "## 数据限制与不确定性",
-            "必须包含 sample_fallback 和 ETF proxy 限制。",
+            "必须包含 holdings_source 数据来源限制和 ETF proxy 限制；只有 holdings_source.mode=sample_fallback 时才写 sample_fallback 警告。",
             "",
             "## 可观察指标",
             "列出可观察指标，不给交易命令。",
             "",
-            "禁止措辞：需增加持仓、需增加配置、需减持、需减少配置、应买入、应卖出、立即调整、配置不足、配置过剩；risk_level=medium 不得写成中性。",
+            "禁止措辞：需增加持仓、需增加配置、需减持、需减少配置、应买入、应卖出、立即调整、逐步减持、增持、减持、操作建议、推荐行动、补仓、减仓、持仓调整、具体调整方案、配置不足、配置过剩；risk_level=medium 不得写成中性。",
         ]
     )
 
@@ -718,8 +726,10 @@ def _build_mandatory_answer_facts(context_pack: dict[str, Any]) -> str:
         + f"risk_level {_display(market_temperature.get('risk_level'))}.",
         "- Required risk wording: risk_level medium = 中等 / 中等风险水平, not 中性.",
         "- Required wording: 当前更接近“偏热但宏观敏感”（warm_but_macro_sensitive），这不是短期涨跌预测。",
-        "- Required allocation wording: use 低配/高配/相对目标偏低/相对目标偏高；use 后续定投和再平衡时作为观察方向；do not use 配置不足/配置过剩/需增加持仓/需减持/应买入/应卖出/立即调整.",
-        f"- Portfolio data source: {_display(holdings_source.get('mode'))}, not real account.",
+        "- Required allocation wording: use 低配/高配/相对目标偏低/相对目标偏高；use 后续定投和再平衡时作为观察方向；do not use 配置不足/配置过剩/需增加持仓/需减持/逐步减持/增持/减持/应买入/应卖出/立即调整/操作建议/推荐行动/补仓/减仓/持仓调整/具体调整方案.",
+        _portfolio_data_source_line(holdings_source),
+        "- Cash reserve: asset_class=cash / 余额宝 is a cash reserve and DCA deduction source; it is excluded from target-allocation weights.",
+        "- Use only the exact current/target/deviation numbers below. Do not invent model recommended baselines, thresholds, timestamps, data vendors, automatic rebalancing, or example percentages.",
     ]
     for asset in ("sp500", "nasdaq100", "short_bond", "gold"):
         lines.append(
@@ -789,10 +799,11 @@ def build_critical_facts_section(context_pack: dict[str, Any]) -> str:
         f"- PCE YoY: {_format_yoy(_nested(current_regime, ('inflation', 'pce_yoy', 'end_yoy')))}",
         "",
         "## Portfolio Critical Facts",
-        f"- Portfolio data source: {_display(holdings_source.get('mode'))}, not real account.",
-        f"- total_assets: {_format_number(_nested(context_json, ('confirmed_facts', 'portfolio', 'total_assets')))}",
-        f"- invested_assets: {_format_number(_nested(context_json, ('confirmed_facts', 'portfolio', 'invested_assets')))}",
-        f"- cash: {_format_number(_nested(context_json, ('confirmed_facts', 'portfolio', 'cash')))}",
+        _portfolio_data_source_line(holdings_source),
+        f"- total_account_value including cash: {_format_number(_portfolio_value(context_json, 'total_account_value', 'total_assets'))}",
+        f"- invested_asset_value excluding cash: {_format_number(_portfolio_value(context_json, 'invested_asset_value', 'invested_assets'))}",
+        f"- cash_reserve_value: {_format_number(_portfolio_value(context_json, 'cash_reserve_value', 'cash'))}",
+        "- cash reserve rule: asset_class=cash / 余额宝 is a cash reserve and DCA deduction source; it is excluded from target-allocation weights.",
     ]
 
     weights = portfolio.get("weights_ex_cash", {}) if isinstance(portfolio, dict) else {}
@@ -930,7 +941,31 @@ def _sample_fallback_note(context_json: dict[str, Any]) -> str:
     holdings_source = _find_holdings_source(context_json)
     if holdings_source.get("mode") == "sample_fallback":
         return "- 当前 context pack 显示 holdings_source.mode=sample_fallback，必须说明这不是真实账户。"
+    if holdings_source.get("mode") in {"current_holdings", "user_current_holdings", "real_holdings"}:
+        return (
+            "- 当前 context pack 显示 holdings_source.mode=current_holdings，必须说明组合数据来自"
+            "用户本地 current_holdings.csv 快照，手动录入且不保证实时；不要写 sample_fallback 警告。"
+        )
     return "- 若 context pack 显示 holdings_source.mode=sample_fallback，必须说明这不是真实账户。"
+
+
+def _portfolio_data_source_line(holdings_source: dict[str, Any]) -> str:
+    mode = str(holdings_source.get("mode") or "")
+    if mode == "sample_fallback":
+        return "- Portfolio data source: sample_fallback, not real account."
+    if mode in {"current_holdings", "user_current_holdings", "real_holdings"}:
+        return (
+            "- Portfolio data source: current_holdings.csv local user snapshot; "
+            "manually entered from user-confirmed holdings and not guaranteed real-time."
+        )
+    return f"- Portfolio data source: {_display(mode)}."
+
+
+def _portfolio_value(context_json: dict[str, Any], preferred_key: str, fallback_key: str) -> Any:
+    portfolio = _nested(context_json, ("confirmed_facts", "portfolio"))
+    if isinstance(portfolio, dict):
+        return portfolio.get(preferred_key, portfolio.get(fallback_key))
+    return None
 
 
 def _find_holdings_source(context_json: dict[str, Any]) -> dict[str, Any]:

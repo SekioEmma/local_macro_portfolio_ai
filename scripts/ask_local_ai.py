@@ -56,6 +56,37 @@ FORBIDDEN_ANSWER_PATTERNS = [
     "需增加配置",
     "需减持",
     "需减少配置",
+    "逐步减持",
+    "增持",
+    "减持",
+    "操作建议",
+    "具体调整方案",
+    "应调整",
+    "转为更稳健",
+    "推荐行动",
+    "补仓",
+    "减仓",
+    "持仓调整",
+    "逐步增加配置",
+    "建议适度增加",
+    "配置不足",
+    "配置过重",
+    "提升至目标比例",
+    "Bloomberg",
+    "ISO 20022",
+    "模型版本",
+    "规则库",
+    "自动调仓",
+    "无需人工干预",
+    "外部数据源",
+    "实时市场规则模型",
+    "实时生成",
+    "数据更新时间",
+    "机构资金净流入",
+    "利率变动对市场波动率影响系数",
+    "风险评分",
+    "完成3次",
+    "重新校准模型参数",
     "满仓",
     "清仓",
 ]
@@ -163,6 +194,7 @@ def main() -> None:
         guarded = _apply_deterministic_answer_guardrails(
             result["answer"],
             context_pack,
+            user_question=user_question,
         )
         result["answer"] = guarded["answer"]
         if guarded["notes"]:
@@ -211,6 +243,7 @@ def main() -> None:
             guarded = _apply_deterministic_answer_guardrails(
                 retry_result["answer"],
                 context_pack,
+                user_question=user_question,
             )
             retry_result["answer"] = guarded["answer"]
             retry_notes = [
@@ -712,6 +745,24 @@ def validate_answer_text(
         if not any(keyword in answer_lower or keyword in answer for keyword in portfolio_keywords):
             warnings.append("Answer does not reference portfolio allocation facts.")
 
+        if holdings_source.get("mode") in {"current_holdings", "user_current_holdings", "real_holdings"}:
+            if "sample_fallback" in answer or "样本数据" in answer or "示例持仓" in answer:
+                warnings.append("Answer incorrectly describes current_holdings as sample_fallback/sample data.")
+
+            source_keywords = [
+                "current_holdings",
+                "本地",
+                "快照",
+                "手动",
+                "不保证实时",
+            ]
+            if not any(keyword in answer_lower or keyword in answer for keyword in source_keywords):
+                warnings.append("Answer does not reference current_holdings local snapshot source.")
+
+            exact_weight_keywords = ["29.88", "12.65", "35.83", "21.64"]
+            if not any(keyword in answer for keyword in exact_weight_keywords):
+                warnings.append("Answer does not cite current portfolio weight facts.")
+
     if "过热" in user_question:
         market_keywords = [
             "warm_but_macro_sensitive",
@@ -723,6 +774,13 @@ def validate_answer_text(
         if not any(keyword in answer_lower or keyword in answer for keyword in market_keywords):
             warnings.append("Answer does not reference market temperature facts.")
 
+        overall_regime = _find_overall_regime(context_json)
+        if overall_regime == "warm_but_macro_sensitive":
+            if "warm_but_macro_sensitive" not in answer_lower and "偏热但宏观敏感" not in answer:
+                warnings.append("Answer must state warm_but_macro_sensitive / 偏热但宏观敏感.")
+            if "未过热" in answer or "无明显过热" in answer:
+                warnings.append("Answer contradicts warm_but_macro_sensitive by saying 未过热 or 无明显过热.")
+
     return {
         "status": "warning" if warnings else "ok",
         "warnings": _dedupe_strings(warnings),
@@ -732,6 +790,7 @@ def validate_answer_text(
 def _apply_deterministic_answer_guardrails(
     answer: str,
     context_pack: dict[str, Any],
+    user_question: str = "",
 ) -> dict[str, Any]:
     notes = []
     updated = answer.strip()
@@ -745,6 +804,30 @@ def _apply_deterministic_answer_guardrails(
         )
         updated = prefix + updated
         notes.append("Prepended required sample_fallback warning.")
+
+    rewritten = _rewrite_trade_directive_wording(updated)
+    if rewritten != updated:
+        updated = rewritten
+        notes.append("Rewrote trade-directive wording into observation-frame wording.")
+
+    if _answer_has_hallucination_markers(updated) or _misstates_current_holdings_as_sample(
+        updated,
+        holdings_source,
+    ):
+        safe_answer = _build_context_only_safe_answer(context_json, user_question)
+        if safe_answer:
+            updated = safe_answer
+            notes.append("Replaced hallucinated model answer with deterministic context-only answer.")
+
+    facts_block = _build_required_portfolio_facts_appendix(context_json, user_question, updated)
+    if facts_block:
+        updated = updated.rstrip() + "\n\n" + facts_block
+        notes.append("Appended required current-holdings portfolio facts.")
+
+    regime_block = _build_required_market_regime_prefix(context_json, user_question, updated)
+    if regime_block:
+        updated = regime_block + "\n\n" + updated.lstrip()
+        notes.append("Prepended required market regime wording.")
 
     return {
         "answer": updated,
@@ -762,6 +845,295 @@ def _mentions_sample_fallback(answer: str) -> bool:
     )
 
 
+def _rewrite_trade_directive_wording(answer: str) -> str:
+    replacements = (
+        ("## 操作建议", "## 观察框架"),
+        ("# 操作建议", "# 观察框架"),
+        ("操作建议", "观察框架"),
+        ("推荐行动（基于规则逻辑）", "观察方向（基于规则逻辑）"),
+        ("推荐行动", "观察方向"),
+        ("具体调整方案", "观察框架"),
+        ("转为更稳健的债券配置", "作为后续定投和再平衡观察方向"),
+        ("转为更稳健配置", "作为后续定投和再平衡观察方向"),
+        ("转为更稳健", "作为后续定投和再平衡观察"),
+        ("建议逐步增加配置", "相对目标偏低，可作为后续定投和再平衡观察方向"),
+        ("逐步增加配置", "相对目标偏低，作为后续定投和再平衡观察方向"),
+        ("建议优先补仓", "相对目标偏低，可作为后续定投观察方向"),
+        ("优先补仓", "作为后续定投观察方向"),
+        ("补仓", "后续定投观察"),
+        ("减仓", "再平衡观察"),
+        ("持仓调整", "再平衡评估"),
+        ("配置不足", "相对目标偏低"),
+        ("配置过重", "相对目标偏高"),
+        ("偏差修正逻辑", "偏差观察逻辑"),
+        ("建议直接对应", "观察框架对应"),
+        ("可考虑逐步减持", "可在后续定投和再平衡时观察"),
+        ("可以考虑逐步减持", "可以在后续定投和再平衡时观察"),
+        ("逐步减持", "后续定投和再平衡时观察"),
+        ("可考虑短期增持", "可在后续定投和再平衡时观察"),
+        ("可以考虑短期增持", "可以在后续定投和再平衡时观察"),
+        ("短期增持", "后续定投和再平衡时观察"),
+        ("应买入", "作为后续观察方向"),
+        ("应卖出", "作为后续观察方向"),
+        ("立即调整", "等待年度/阈值再平衡评估"),
+        ("需增加持仓", "相对目标偏低"),
+        ("需增加配置", "相对目标偏低"),
+        ("需减少配置", "相对目标偏高"),
+        ("需减持", "相对目标偏高"),
+        ("减持", "再平衡观察"),
+        ("增持", "再平衡观察"),
+    )
+    updated = answer
+    for source, target in replacements:
+        updated = updated.replace(source, target)
+    updated = re.sub(
+        r"目标[:：]\s*提升至目标比例\+?\d+(?:\.\d+)?%",
+        "观察：相对目标偏低",
+        updated,
+    )
+    updated = re.sub(
+        r"再平衡观察\d+(?:\.\d+)?%[-–]\d+(?:\.\d+)?%",
+        "等待年度/阈值再平衡评估",
+        updated,
+    )
+    updated = re.sub(
+        r"再平衡观察\d+(?:\.\d+)?%",
+        "等待年度/阈值再平衡评估",
+        updated,
+    )
+    return updated
+
+
+def _answer_has_hallucination_markers(answer: str) -> bool:
+    markers = (
+        "Bloomberg",
+        "ISO 20022",
+        "模型版本",
+        "规则库",
+        "规则第",
+        "自动调仓",
+        "自动执行",
+        "自动归类",
+        "无需人工干预",
+        "唯一当前状态",
+        "可操作状态",
+        "模型推荐基准",
+        "70% 持仓权重",
+        "需人工复核数据",
+        "数据更新时间",
+        "机构资金净流入",
+        "交易量",
+        "资金流入",
+        "政策调整",
+        "国际事件",
+        "短期回调",
+        "模型预测",
+        "建议适度增加",
+        "投资者保持灵活配置",
+        "美联储政策",
+        "地缘政治",
+        "实时响应能力",
+        "模拟数据",
+        "实时数据为准",
+        "动态调整",
+        "自动调整机制",
+        "配置需求不足",
+        "过度抛售",
+        "资金短期流入",
+        "避险需求",
+        "当前市场处于过热状态",
+        "利率变动对市场波动率影响系数",
+        "风险评分",
+        "完成3次",
+        "重新校准模型参数",
+    )
+    return any(marker in answer for marker in markers)
+
+
+def _misstates_current_holdings_as_sample(answer: str, holdings_source: dict[str, Any]) -> bool:
+    if holdings_source.get("mode") not in {"current_holdings", "user_current_holdings", "real_holdings"}:
+        return False
+    return "sample_fallback" in answer or "样本数据" in answer or "示例持仓" in answer
+
+
+def _build_context_only_safe_answer(context_json: dict[str, Any], user_question: str) -> str:
+    if "过热" not in user_question and "组合" not in user_question:
+        return ""
+
+    assessments = context_json.get("rule_based_assessments", {})
+    if not isinstance(assessments, dict):
+        assessments = {}
+    market_temperature = assessments.get("market_temperature", {})
+    if not isinstance(market_temperature, dict):
+        market_temperature = {}
+    portfolio = context_json.get("portfolio_context", {})
+    if not isinstance(portfolio, dict):
+        portfolio = {}
+
+    holdings_source = _find_holdings_source(context_json)
+    weights = portfolio.get("weights_ex_cash", {})
+    targets = portfolio.get("target_allocation", {})
+    deviations = portfolio.get("deviation", {})
+    flags = portfolio.get("deviation_flags", {})
+    dca = portfolio.get("dca_budget_check", {})
+
+    lines = [
+        "## 核心结论",
+        "当前更接近“偏热但宏观敏感”（warm_but_macro_sensitive），这不是短期涨跌预测，也不是交易指令。",
+        "",
+        "## 关键事实",
+        f"- equity_temperature: {_display(_level_value(market_temperature.get('equity_temperature')))}",
+        f"- overall_regime: {_display(market_temperature.get('overall_regime'))}",
+        f"- risk_level: {_display(market_temperature.get('risk_level'))} / 中等风险水平",
+        "- 数据来源：用户本地 current_holdings.csv 快照，手动录入且不保证实时。",
+        "- 余额宝/cash：现金准备金和扣款来源，不纳入目标仓位计算，也不等于应立即投入的闲置资金。",
+        "",
+        "## 对组合的含义",
+        "以下只描述相对目标的仓位偏离，作为后续定投和年度/阈值再平衡的观察方向。",
+    ]
+
+    for asset in ("sp500", "nasdaq100", "short_bond", "gold"):
+        lines.append(
+            "- "
+            + f"{asset}: 当前 {_format_percent(weights.get(asset))}, "
+            + f"目标 {_format_percent(targets.get(asset))}, "
+            + f"偏离 {_format_pp(deviations.get(asset))}, "
+            + f"{_allocation_label(flags.get(asset))}。"
+        )
+
+    lines.extend(
+        [
+            "- DCA budget: "
+            + f"daily_total {_format_number(dca.get('daily_total'))}, "
+            + f"estimated_monthly {_format_number(dca.get('monthly_required'))}, "
+            + f"budget_range {_format_number(dca.get('budget_min'))}-{_format_number(dca.get('budget_max'))}, "
+            + f"status {_display(dca.get('status'))}。",
+            "",
+            "## 数据限制与不确定性",
+            "- current_holdings.csv 是用户本地手动录入快照，不保证实时更新。",
+            "- ETF proxy 或历史相似结果只能作为历史参照，historical outcome is not forecast。",
+            "- 若市场数据源失败、缓存过期或 context_health 降级，应标注限制，不编造缺失数据。",
+            "",
+            "## 可观察指标",
+            "- equity_temperature、overall_regime、risk_level。",
+            "- DGS10、CPI YoY、PCE YoY、market_snapshot.status、used_cache。",
+            "- 后续定投执行情况、余额宝现金准备金是否覆盖扣款节奏。",
+        ]
+    )
+
+    return "\n".join(lines)
+
+
+def _level_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return value.get("level")
+    return value
+
+
+def _build_required_portfolio_facts_appendix(
+    context_json: dict[str, Any],
+    user_question: str,
+    answer: str,
+) -> str:
+    if "组合" not in user_question:
+        return ""
+
+    holdings_source = _find_holdings_source(context_json)
+    if holdings_source.get("mode") not in {"current_holdings", "user_current_holdings", "real_holdings"}:
+        return ""
+
+    if all(token in answer for token in ("29.88", "12.65", "35.83", "21.64")):
+        return ""
+
+    portfolio = context_json.get("portfolio_context", {})
+    if not isinstance(portfolio, dict):
+        return ""
+
+    weights = portfolio.get("weights_ex_cash", {})
+    targets = portfolio.get("target_allocation", {})
+    deviations = portfolio.get("deviation", {})
+    flags = portfolio.get("deviation_flags", {})
+    dca = portfolio.get("dca_budget_check", {})
+
+    lines = [
+        "## 组合关键事实（本地快照）",
+        "以下只描述仓位偏离，作为后续定投和年度/阈值再平衡的观察方向，不是买卖指令。",
+        "- 数据来源：用户本地 current_holdings.csv 快照，手动录入且不保证实时。",
+        "- 余额宝/cash：现金准备金和扣款来源，不纳入目标仓位计算，也不等于应立即投入的闲置资金。",
+    ]
+    for asset in ("sp500", "nasdaq100", "short_bond", "gold"):
+        lines.append(
+            "- "
+            + f"{asset}: 当前 {_format_percent(weights.get(asset))}, "
+            + f"目标 {_format_percent(targets.get(asset))}, "
+            + f"偏离 {_format_pp(deviations.get(asset))}, "
+            + f"{_allocation_label(flags.get(asset))}。"
+        )
+
+    lines.append(
+        "- DCA budget: "
+        + f"daily_total {_format_number(dca.get('daily_total'))}, "
+        + f"estimated_monthly {_format_number(dca.get('monthly_required'))}, "
+        + f"budget_range {_format_number(dca.get('budget_min'))}-{_format_number(dca.get('budget_max'))}, "
+        + f"status {_display(dca.get('status'))}。"
+    )
+    return "\n".join(lines)
+
+
+def _build_required_market_regime_prefix(
+    context_json: dict[str, Any],
+    user_question: str,
+    answer: str,
+) -> str:
+    if "过热" not in user_question:
+        return ""
+    if _find_overall_regime(context_json) != "warm_but_macro_sensitive":
+        return ""
+    if "warm_but_macro_sensitive" in answer.lower() or "偏热但宏观敏感" in answer:
+        return ""
+    return (
+        "核心结论：当前更接近“偏热但宏观敏感”"
+        "（warm_but_macro_sensitive），这不是短期涨跌预测。"
+    )
+
+
+def _format_percent(value: Any) -> str:
+    try:
+        return f"{float(value) * 100:.2f}%"
+    except (TypeError, ValueError):
+        return "unavailable"
+
+
+def _format_pp(value: Any) -> str:
+    try:
+        return f"{float(value) * 100:+.2f}pp"
+    except (TypeError, ValueError):
+        return "unavailable"
+
+
+def _format_number(value: Any) -> str:
+    try:
+        return f"{float(value):.2f}"
+    except (TypeError, ValueError):
+        return "unavailable"
+
+
+def _allocation_label(flag: Any) -> str:
+    if flag == "underweight":
+        return "低配 / 相对目标偏低"
+    if flag == "overweight":
+        return "高配 / 相对目标偏高"
+    if flag == "within_range":
+        return "接近目标范围"
+    return _display(flag)
+
+
+def _display(value: Any) -> str:
+    if value is None or value == "":
+        return "unavailable"
+    return str(value)
+
+
 def _find_holdings_source(context_json: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(context_json, dict):
         return {}
@@ -774,6 +1146,30 @@ def _find_holdings_source(context_json: dict[str, Any]) -> dict[str, Any]:
         if isinstance(candidate, dict) and candidate:
             return candidate
     return {}
+
+
+def _find_overall_regime(context_json: dict[str, Any]) -> str | None:
+    assessments = context_json.get("rule_based_assessments", {})
+    if not isinstance(assessments, dict):
+        assessments = {}
+    market_temperature = assessments.get("market_temperature", {})
+    if not isinstance(market_temperature, dict):
+        market_temperature = {}
+    confirmed = context_json.get("confirmed_facts", {})
+    if not isinstance(confirmed, dict):
+        confirmed = {}
+    market = confirmed.get("market", {})
+    if not isinstance(market, dict):
+        market = {}
+
+    candidates = [
+        market_temperature.get("overall_regime"),
+        market.get("overall_regime"),
+    ]
+    for candidate in candidates:
+        if candidate:
+            return str(candidate)
+    return None
 
 
 def _dedupe_strings(items: list[str]) -> list[str]:

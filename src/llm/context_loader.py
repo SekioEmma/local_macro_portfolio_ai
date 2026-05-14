@@ -246,6 +246,7 @@ def summarize_data_limitations(limitations: list[str]) -> list[str]:
 
     buckets: dict[str, list[str]] = {
         "sample": [],
+        "current_holdings": [],
         "stale_cache": [],
         "fred_connection": [],
         "alpha_vantage_connection": [],
@@ -257,8 +258,10 @@ def summarize_data_limitations(limitations: list[str]) -> list[str]:
     for limitation in limitations:
         text = str(limitation)
         lower = text.lower()
-        if "sample_fallback" in lower or "sample fallback" in lower or "current_holdings.csv" in lower:
+        if "sample_fallback" in lower or "sample fallback" in lower:
             buckets["sample"].append(text)
+        elif "current_holdings.csv" in lower:
+            buckets["current_holdings"].append(text)
         elif "stale_cache" in lower or "stale cache" in lower or "used stale cache" in lower:
             buckets["stale_cache"].append(text)
         elif "stlouisfed.org" in lower or "fred " in lower or "fred:" in lower:
@@ -276,6 +279,7 @@ def summarize_data_limitations(limitations: list[str]) -> list[str]:
 
     summarized: list[str] = []
     summarized.extend(_summarize_named_bucket("Sample holdings fallback", buckets["sample"], keep_examples=2))
+    summarized.extend(_summarize_named_bucket("Current holdings snapshot", buckets["current_holdings"], keep_examples=2))
     summarized.extend(_summarize_named_bucket("Stale cache", buckets["stale_cache"], keep_examples=2))
     summarized.extend(
         _summarize_named_bucket("FRED connection failures", buckets["fred_connection"], keep_examples=1)

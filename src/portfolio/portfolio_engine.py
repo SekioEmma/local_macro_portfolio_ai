@@ -118,6 +118,9 @@ def calculate_total_assets(aggregated: dict) -> dict:
         "total_assets": _round_money(total_assets),
         "invested_assets": _round_money(total_assets - cash),
         "cash": _round_money(cash),
+        "total_account_value": _round_money(total_assets),
+        "invested_asset_value": _round_money(total_assets - cash),
+        "cash_reserve_value": _round_money(cash),
         "total_profit_loss": _round_money(total_profit_loss),
     }
 
@@ -242,6 +245,9 @@ def generate_portfolio_snapshot(
         "total_assets": totals["total_assets"],
         "invested_assets": totals["invested_assets"],
         "cash": totals["cash"],
+        "total_account_value": totals["total_account_value"],
+        "invested_asset_value": totals["invested_asset_value"],
+        "cash_reserve_value": totals["cash_reserve_value"],
         "total_profit_loss": totals["total_profit_loss"],
         "aggregated_by_asset_class": aggregated,
         "weights_ex_cash": weights_ex_cash,
@@ -251,7 +257,9 @@ def generate_portfolio_snapshot(
         "dca_budget_check": dca_budget_check,
         "notes": [
             "This snapshot is descriptive only and does not include investment advice.",
-            "Cash is excluded from target-allocation weights by default.",
+            "Cash is treated as cash reserve and excluded from target-allocation weights by default.",
+            "Cash reserve can be a DCA deduction source; it is not a target investment asset.",
+            "Current cash reserve is a point-in-time snapshot, not remaining monthly contribution amount.",
             "Deviation is calculated as current weight minus target weight.",
         ],
     }

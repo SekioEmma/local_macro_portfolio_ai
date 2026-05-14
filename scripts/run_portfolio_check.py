@@ -39,8 +39,16 @@ def _select_holdings_file() -> tuple[Path, dict]:
     if CURRENT_HOLDINGS_PATH.exists():
         return CURRENT_HOLDINGS_PATH, {
             "path": str(CURRENT_HOLDINGS_PATH),
-            "mode": "current",
-            "warning": None,
+            "mode": "current_holdings",
+            "warning": (
+                "Using user-provided current_holdings.csv local snapshot. "
+                "It was manually entered from a user-confirmed holdings screenshot "
+                "and is not guaranteed to be real-time."
+            ),
+            "cash_reserve_note": (
+                "asset_class=cash is treated as cash reserve and DCA deduction source; "
+                "it is excluded from target-allocation weights."
+            ),
         }
 
     return SAMPLE_HOLDINGS_PATH, {

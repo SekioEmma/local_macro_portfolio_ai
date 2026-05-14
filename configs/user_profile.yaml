@@ -1,7 +1,7 @@
 user:
   stage: student
   monthly_budget_min: 1200
-  monthly_budget_max: 1300
+  monthly_budget_max: 1500
   platform:
     - 支付宝基金
     - 余额宝
