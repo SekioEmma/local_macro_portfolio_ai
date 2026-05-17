@@ -172,14 +172,28 @@ def main() -> None:
         if mode == "local_http":
             ollama_health = check_ollama_health(config)
             if ollama_health.get("status") not in {"ok", "skipped"}:
+                fallback_answer = _build_context_only_safe_answer(
+                    context_pack.get("context_json", {}),
+                    user_question,
+                )
                 result = {
-                    "status": "ollama_health_error",
+                    "status": (
+                        "ollama_health_error_context_fallback"
+                        if fallback_answer
+                        else "ollama_health_error"
+                    ),
                     "provider": config.get("local_llm", {}).get("provider"),
                     "model": config.get("local_llm", {}).get("model"),
                     "prompt": prompt,
-                    "answer": None,
+                    "answer": fallback_answer or None,
                     "removed_thinking": False,
-                    "cleaning_notes": [],
+                    "cleaning_notes": (
+                        [
+                            "Ollama health check failed; wrote deterministic context-only fallback answer."
+                        ]
+                        if fallback_answer
+                        else []
+                    ),
                     "error": ollama_health.get("error") or ollama_health.get("hint"),
                     "raw_metadata": {
                         "ollama_health": ollama_health,
@@ -805,19 +819,18 @@ def _apply_deterministic_answer_guardrails(
         updated = prefix + updated
         notes.append("Prepended required sample_fallback warning.")
 
+    if _answer_requires_context_only_fallback(updated, holdings_source):
+        safe_answer = _build_context_only_safe_answer(context_json, user_question)
+        if safe_answer:
+            return {
+                "answer": safe_answer,
+                "notes": ["Replaced hallucinated model answer with deterministic context-only answer."],
+            }
+
     rewritten = _rewrite_trade_directive_wording(updated)
     if rewritten != updated:
         updated = rewritten
         notes.append("Rewrote trade-directive wording into observation-frame wording.")
-
-    if _answer_has_hallucination_markers(updated) or _misstates_current_holdings_as_sample(
-        updated,
-        holdings_source,
-    ):
-        safe_answer = _build_context_only_safe_answer(context_json, user_question)
-        if safe_answer:
-            updated = safe_answer
-            notes.append("Replaced hallucinated model answer with deterministic context-only answer.")
 
     facts_block = _build_required_portfolio_facts_appendix(context_json, user_question, updated)
     if facts_block:
@@ -904,8 +917,42 @@ def _rewrite_trade_directive_wording(answer: str) -> str:
     return updated
 
 
+def _answer_requires_context_only_fallback(answer: str, holdings_source: dict[str, Any]) -> bool:
+    return (
+        _answer_has_hallucination_markers(answer)
+        or _misstates_current_holdings_as_sample(answer, holdings_source)
+        or any(pattern in answer for pattern in FORBIDDEN_ANSWER_PATTERNS)
+    )
+
+
 def _answer_has_hallucination_markers(answer: str) -> bool:
     markers = (
+        "2023-10-27",
+        "14:30",
+        "过去30天热度指数",
+        "过去 30 天热度指数",
+        "阈值0.7",
+        "阈值 0.7",
+        "阈值0.6",
+        "阈值 0.6",
+        "阈值0.5",
+        "阈值 0.5",
+        "风险指数 = 0.55",
+        "风险指数=0.55",
+        "标普目标40%",
+        "标普目标 40%",
+        "标普500目标40%",
+        "标普500目标 40%",
+        "纳指目标35%",
+        "纳指目标 35%",
+        "纳斯达克目标35%",
+        "纳斯达克目标 35%",
+        "短债目标35%",
+        "短债目标 35%",
+        "黄金目标20%",
+        "黄金目标 20%",
+        "用户确认的实时快照",
+        "请提供更详细的上下文",
         "Bloomberg",
         "ISO 20022",
         "模型版本",
@@ -936,6 +983,21 @@ def _answer_has_hallucination_markers(answer: str) -> bool:
         "模拟数据",
         "实时数据为准",
         "动态调整",
+        "pattern of repetitive",
+        "not a real query",
+        "just a pattern",
+        "casual chat",
+        "What would you like",
+        "feel free to rephrase",
+        "The current market condition",
+        "slightly overheated",
+        "Key Observations",
+        "live data feeds",
+        "financial advisor",
+        "Always verify",
+        "This response is generated",
+        "😊",
+        "🛠️",
         "自动调整机制",
         "配置需求不足",
         "过度抛售",
@@ -947,7 +1009,9 @@ def _answer_has_hallucination_markers(answer: str) -> bool:
         "完成3次",
         "重新校准模型参数",
     )
-    return any(marker in answer for marker in markers)
+    if any(marker in answer for marker in markers):
+        return True
+    return bool(re.search(r"[\u0590-\u05ff]", answer))
 
 
 def _misstates_current_holdings_as_sample(answer: str, holdings_source: dict[str, Any]) -> bool:
@@ -977,6 +1041,11 @@ def _build_context_only_safe_answer(context_json: dict[str, Any], user_question:
     flags = portfolio.get("deviation_flags", {})
     dca = portfolio.get("dca_budget_check", {})
     holdings_updated_at = _portfolio_confirmed_value(context_json, "holdings_updated_at")
+    holdings_age_days = _portfolio_confirmed_value(context_json, "holdings_age_days")
+    holdings_freshness_status = _portfolio_confirmed_value(context_json, "holdings_freshness_status")
+    total_account_value = _portfolio_confirmed_value(context_json, "total_account_value")
+    invested_asset_value = _portfolio_confirmed_value(context_json, "invested_asset_value")
+    cash_reserve_value = _portfolio_confirmed_value(context_json, "cash_reserve_value")
 
     lines = [
         "## 核心结论",
@@ -986,8 +1055,15 @@ def _build_context_only_safe_answer(context_json: dict[str, Any], user_question:
         f"- equity_temperature: {_display(_level_value(market_temperature.get('equity_temperature')))}",
         f"- overall_regime: {_display(market_temperature.get('overall_regime'))}",
         f"- risk_level: {_display(market_temperature.get('risk_level'))} / 中等风险水平",
-        f"- 数据来源：用户本地 current_holdings.csv 快照，持仓日期 {_display(holdings_updated_at)}，手动录入且不保证实时。",
+        (
+            f"- 数据来源：用户本地 current_holdings.csv 快照，持仓日期 {_display(holdings_updated_at)}，"
+            f"age_days {_display(holdings_age_days)}，freshness {_display(holdings_freshness_status)}；"
+            "手动录入且不保证实时。"
+        ),
         "- 余额宝/cash：现金准备金和扣款来源，不纳入目标仓位计算，也不等于应立即投入的闲置资金。",
+        f"- total_account_value: {_format_number(total_account_value)}。",
+        f"- invested_asset_value: {_format_number(invested_asset_value)}。",
+        f"- cash_reserve_value: {_format_number(cash_reserve_value)}。",
         "",
         "## 对组合的含义",
         "以下只描述相对目标的仓位偏离，作为后续定投和年度/阈值再平衡的观察方向。",
@@ -1066,11 +1142,17 @@ def _build_required_portfolio_facts_appendix(
     flags = portfolio.get("deviation_flags", {})
     dca = portfolio.get("dca_budget_check", {})
     holdings_updated_at = _portfolio_confirmed_value(context_json, "holdings_updated_at")
+    holdings_age_days = _portfolio_confirmed_value(context_json, "holdings_age_days")
+    holdings_freshness_status = _portfolio_confirmed_value(context_json, "holdings_freshness_status")
 
     lines = [
         "## 组合关键事实（本地快照）",
         "以下只描述仓位偏离，作为后续定投和年度/阈值再平衡的观察方向，不是买卖指令。",
-        f"- 数据来源：用户本地 current_holdings.csv 快照，持仓日期 {_display(holdings_updated_at)}，手动录入且不保证实时。",
+        (
+            f"- 数据来源：用户本地 current_holdings.csv 快照，持仓日期 {_display(holdings_updated_at)}，"
+            f"age_days {_display(holdings_age_days)}，freshness {_display(holdings_freshness_status)}；"
+            "手动录入且不保证实时。"
+        ),
         "- 余额宝/cash：现金准备金和扣款来源，不纳入目标仓位计算，也不等于应立即投入的闲置资金。",
     ]
     for asset in ("sp500", "nasdaq100", "short_bond", "gold"):

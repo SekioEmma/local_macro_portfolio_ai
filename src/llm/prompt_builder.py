@@ -79,6 +79,7 @@ def build_answer_prompt(
             "- 如果账户还是 sample_fallback，必须说明当前不是真实账户。",
             "- 如果 holdings_source.mode=sample_fallback，必须在核心结论中明确写出：当前账户数据是示例持仓，不是真实账户。",
             "- 如果 holdings_source.mode=current_holdings，必须说明组合数据来自用户本地 current_holdings.csv 快照，手动录入且不保证实时。",
+            "- 必须使用 holdings_freshness_status 区分本地持仓快照时效；stale/very_stale/unknown 时不得把持仓当成实时账户同步。",
             "- 余额宝或 asset_class=cash 是现金准备金/扣款来源，不纳入目标仓位计算，也不要解释成应立即投资的闲置资金。",
             "- 回答“对组合意味着什么”时，必须使用 Portfolio Critical Facts。",
             "- 不得声称缺少组合配置，因为 Portfolio Critical Facts 已提供。",
@@ -804,6 +805,8 @@ def build_critical_facts_section(context_pack: dict[str, Any]) -> str:
         f"- invested_asset_value excluding cash: {_format_number(_portfolio_value(context_json, 'invested_asset_value', 'invested_assets'))}",
         f"- cash_reserve_value: {_format_number(_portfolio_value(context_json, 'cash_reserve_value', 'cash'))}",
         f"- holdings_updated_at: {_display(_portfolio_value(context_json, 'holdings_updated_at', 'holdings_updated_at'))}",
+        f"- holdings_age_days: {_format_number(_portfolio_value(context_json, 'holdings_age_days', 'holdings_age_days'))}",
+        f"- holdings_freshness_status: {_display(_portfolio_value(context_json, 'holdings_freshness_status', 'holdings_freshness_status'))}",
         "- cash reserve rule: asset_class=cash / 余额宝 is a cash reserve and DCA deduction source; it is excluded from target-allocation weights.",
     ]
 
@@ -945,7 +948,7 @@ def _sample_fallback_note(context_json: dict[str, Any]) -> str:
     if holdings_source.get("mode") in {"current_holdings", "user_current_holdings", "real_holdings"}:
         return (
             "- 当前 context pack 显示 holdings_source.mode=current_holdings，必须说明组合数据来自"
-            "用户本地 current_holdings.csv 快照，手动录入且不保证实时；不要写 sample_fallback 警告。"
+            "用户本地 current_holdings.csv 快照，手动录入且不保证实时；必须说明 holdings_freshness_status；不要写 sample_fallback 警告。"
         )
     return "- 若 context pack 显示 holdings_source.mode=sample_fallback，必须说明这不是真实账户。"
 

@@ -211,6 +211,17 @@ def validate_context_health(
         if not policy.get("allow_sample_fallback", True):
             degraded_reasons.append("sample_fallback is disabled by context_policy.")
 
+    holdings_freshness = _find_holdings_freshness(context_json)
+    freshness_status = holdings_freshness.get("holdings_freshness_status")
+    if freshness_status in {"aging", "stale", "very_stale"}:
+        warnings.append(
+            "holdings snapshot freshness is "
+            f"{freshness_status}: updated_at={holdings_freshness.get('holdings_updated_at')} "
+            f"age_days={holdings_freshness.get('holdings_age_days')}; do not treat as real-time account sync."
+        )
+    elif freshness_status == "unknown":
+        warnings.append("holdings snapshot freshness is unknown; account snapshot timeliness is uncertain.")
+
     limitations = context_json.get("data_limitations", [])
     limitation_count = len(limitations) if isinstance(limitations, list) else 0
     max_limitations = _as_int(
@@ -350,6 +361,30 @@ def _find_holdings_source(context_json: dict[str, Any]) -> dict[str, Any]:
     for candidate in candidates:
         if isinstance(candidate, dict) and candidate:
             return candidate
+    return {}
+
+
+def _find_holdings_freshness(context_json: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(context_json, dict):
+        return {}
+    data_quality = context_json.get("data_quality", {})
+    confirmed = context_json.get("confirmed_facts", {}).get("portfolio", {})
+    portfolio_context = context_json.get("portfolio_context", {})
+    candidates = [data_quality, confirmed, portfolio_context]
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        freshness_status = candidate.get("portfolio_holdings_freshness_status") or candidate.get(
+            "holdings_freshness_status"
+        )
+        if freshness_status:
+            return {
+                "holdings_freshness_status": freshness_status,
+                "holdings_updated_at": candidate.get("portfolio_holdings_updated_at")
+                or candidate.get("holdings_updated_at"),
+                "holdings_age_days": candidate.get("portfolio_holdings_age_days")
+                or candidate.get("holdings_age_days"),
+            }
     return {}
 
 

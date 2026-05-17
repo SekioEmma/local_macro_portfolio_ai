@@ -48,10 +48,10 @@ def main() -> None:
 
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     DAILY_REPORT_JSON_PATH.write_text(
-        json.dumps(report_json, ensure_ascii=False, indent=2) + "\n",
+        "\ufeff" + json.dumps(report_json, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
-    DAILY_REPORT_MD_PATH.write_text(report_markdown + "\n", encoding="utf-8")
+    DAILY_REPORT_MD_PATH.write_text("\ufeff" + report_markdown + "\n", encoding="utf-8")
 
     print(report_markdown)
 

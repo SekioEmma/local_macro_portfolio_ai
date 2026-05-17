@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import csv
+import io
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -18,47 +20,148 @@ REQUIRED_HOLDING_FIELDS = (
 )
 
 MONEY_FIELDS = ("current_value", "cost_basis", "profit_loss")
+CSV_ENCODINGS = ("utf-8-sig", "utf-8", "gb18030")
+MOJIBAKE_MARKERS = (
+    "鎽╂牴",
+    "绾虫柉",
+    "骞垮彂",
+    "鍩洪噾",
+    "浣欓",
+    "鐭",
+    "鑱旀帴",
+)
+CANONICAL_ASSET_NAMES = {
+    "017641": "摩根标普500指数(QDII)A",
+    "019172": "摩根纳斯达克100指数(QDII)A",
+    "270042": "广发纳斯达克100ETF联接(QDII)A",
+    "016527": "招商鑫诚短债债券C",
+    "008987": "广发上海金ETF联接C",
+    "cash_yuebao": "余额宝",
+}
 
 
 def load_holdings_csv(path: str) -> list[dict]:
     csv_path = Path(path)
+    reader = _read_csv_with_encoding_fallback(csv_path)
 
-    with csv_path.open("r", encoding="utf-8-sig", newline="") as file:
-        reader = csv.DictReader(file)
-        if reader.fieldnames is None:
-            raise ValueError(f"Holdings CSV has no header: {csv_path}")
+    if reader.fieldnames is None:
+        raise ValueError(f"Holdings CSV has no header: {csv_path}")
 
-        missing_fields = [
-            field for field in REQUIRED_HOLDING_FIELDS if field not in reader.fieldnames
-        ]
-        if missing_fields:
-            missing = ", ".join(missing_fields)
-            raise ValueError(f"Holdings CSV is missing required field(s): {missing}")
+    missing_fields = [
+        field for field in REQUIRED_HOLDING_FIELDS if field not in reader.fieldnames
+    ]
+    if missing_fields:
+        missing = ", ".join(missing_fields)
+        raise ValueError(f"Holdings CSV is missing required field(s): {missing}")
 
-        holdings: list[dict] = []
-        for row_number, row in enumerate(reader, start=2):
-            normalized = {
-                field: (row.get(field) or "").strip() for field in REQUIRED_HOLDING_FIELDS
-            }
+    holdings: list[dict] = []
+    for row_number, row in enumerate(reader, start=2):
+        normalized = {
+            field: _repair_mojibake_text((row.get(field) or "").strip())
+            for field in REQUIRED_HOLDING_FIELDS
+        }
+        normalized = _apply_canonical_asset_name(normalized)
 
-            if not normalized["asset_class"]:
+        if not normalized["asset_class"]:
+            raise ValueError(
+                f"Holdings CSV row {row_number} is missing asset_class."
+            )
+
+        for field in MONEY_FIELDS:
+            raw_value = normalized[field]
+            try:
+                normalized[field] = float(raw_value)
+            except ValueError as exc:
                 raise ValueError(
-                    f"Holdings CSV row {row_number} is missing asset_class."
-                )
+                    f"Holdings CSV row {row_number} has invalid {field}: "
+                    f"{raw_value!r}."
+                ) from exc
 
-            for field in MONEY_FIELDS:
-                raw_value = normalized[field]
-                try:
-                    normalized[field] = float(raw_value)
-                except ValueError as exc:
-                    raise ValueError(
-                        f"Holdings CSV row {row_number} has invalid {field}: "
-                        f"{raw_value!r}."
-                    ) from exc
-
-            holdings.append(normalized)
+        holdings.append(normalized)
 
     return holdings
+
+
+def _read_csv_with_encoding_fallback(csv_path: Path) -> csv.DictReader:
+    raw_bytes = csv_path.read_bytes()
+    mojibake_reader: csv.DictReader | None = None
+
+    for encoding in CSV_ENCODINGS:
+        try:
+            text = raw_bytes.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+
+        reader = csv.DictReader(io.StringIO(text), strict=True)
+        rows = list(reader)
+        if reader.fieldnames is None:
+            continue
+
+        if _rows_contain_mojibake(rows):
+            repaired_rows = [
+                {key: _repair_mojibake_text(value or "") for key, value in row.items()}
+                for row in rows
+            ]
+            if not _rows_contain_mojibake(repaired_rows):
+                return _rows_to_reader(reader.fieldnames, repaired_rows)
+            mojibake_reader = _rows_to_reader(reader.fieldnames, repaired_rows)
+            continue
+
+        return _rows_to_reader(reader.fieldnames, rows)
+
+    if mojibake_reader is not None:
+        return mojibake_reader
+
+    raise ValueError(
+        "Unable to read holdings CSV with supported encodings: "
+        + ", ".join(CSV_ENCODINGS)
+    )
+
+
+def _rows_to_reader(fieldnames: list[str], rows: list[dict]) -> csv.DictReader:
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=fieldnames, lineterminator="\n")
+    writer.writeheader()
+    writer.writerows(rows)
+    output.seek(0)
+    return csv.DictReader(output)
+
+
+def _rows_contain_mojibake(rows: list[dict]) -> bool:
+    return any(
+        _contains_mojibake(str(value))
+        for row in rows
+        for value in row.values()
+        if value is not None
+    )
+
+
+def _contains_mojibake(value: str) -> bool:
+    return any(marker in value for marker in MOJIBAKE_MARKERS)
+
+
+def _repair_mojibake_text(value: str) -> str:
+    if not _contains_mojibake(value):
+        return value
+    for encoding in ("gb18030", "gbk"):
+        try:
+            repaired = value.encode(encoding).decode("utf-8")
+        except UnicodeError:
+            continue
+        if not _contains_mojibake(repaired):
+            return repaired
+    return value
+
+
+def _apply_canonical_asset_name(row: dict) -> dict:
+    fund_code = str(row.get("fund_code", "")).strip()
+    asset_class = str(row.get("asset_class", "")).strip()
+    canonical_name = CANONICAL_ASSET_NAMES.get(fund_code)
+    if canonical_name is None and asset_class == "cash":
+        canonical_name = CANONICAL_ASSET_NAMES["cash_yuebao"]
+    if canonical_name and _contains_mojibake(str(row.get("asset_name", ""))):
+        row["asset_name"] = canonical_name
+    return row
 
 
 def load_user_profile(path: str) -> dict:
@@ -252,9 +355,12 @@ def generate_portfolio_snapshot(
         "cash_reserve_value": totals["cash_reserve_value"],
         "total_profit_loss": totals["total_profit_loss"],
         "holdings_updated_at": holdings_freshness["holdings_updated_at"],
+        "holdings_age_days": holdings_freshness["holdings_age_days"],
+        "holdings_freshness_status": holdings_freshness["holdings_freshness_status"],
         "holdings_updated_at_status": holdings_freshness["holdings_updated_at_status"],
         "holdings_updated_at_values": holdings_freshness["holdings_updated_at_values"],
         "holdings_row_count": holdings_freshness["holdings_row_count"],
+        "holdings": [_holding_detail(holding) for holding in holdings],
         "aggregated_by_asset_class": aggregated,
         "weights_ex_cash": weights_ex_cash,
         "target_allocation": rounded_target_allocation,
@@ -272,6 +378,20 @@ def generate_portfolio_snapshot(
     }
 
 
+def _holding_detail(holding: dict) -> dict:
+    return {
+        "asset_name": holding.get("asset_name"),
+        "fund_code": holding.get("fund_code"),
+        "asset_class": holding.get("asset_class"),
+        "current_value": _round_money(holding.get("current_value", 0.0)),
+        "cost_basis": _round_money(holding.get("cost_basis", 0.0)),
+        "profit_loss": _round_money(holding.get("profit_loss", 0.0)),
+        "currency": holding.get("currency"),
+        "updated_at": holding.get("updated_at"),
+        "notes": holding.get("notes"),
+    }
+
+
 def summarize_holdings_updated_at(holdings: list[dict]) -> dict:
     values = sorted(
         {
@@ -280,18 +400,52 @@ def summarize_holdings_updated_at(holdings: list[dict]) -> dict:
             if str(holding.get("updated_at", "")).strip()
         }
     )
-    status = "missing"
+    updated_at_status = "missing"
     if len(values) == 1:
-        status = "consistent"
+        updated_at_status = "consistent"
     elif len(values) > 1:
-        status = "mixed"
+        updated_at_status = "mixed"
+
+    parsed_dates = [_parse_holding_date(value) for value in values]
+    parsed_dates = [value for value in parsed_dates if value is not None]
+    latest_date = max(parsed_dates) if parsed_dates else None
+    age_days = (date.today() - latest_date).days if latest_date else None
+    freshness_status = _classify_holdings_freshness(age_days)
 
     return {
-        "holdings_updated_at": values[-1] if values else None,
-        "holdings_updated_at_status": status,
+        "holdings_updated_at": latest_date.isoformat() if latest_date else (values[-1] if values else None),
+        "holdings_age_days": age_days,
+        "holdings_freshness_status": freshness_status,
+        "holdings_updated_at_status": updated_at_status,
         "holdings_updated_at_values": values,
         "holdings_row_count": len(holdings),
     }
+
+
+def _parse_holding_date(value: str) -> date | None:
+    raw_value = str(value).strip()
+    if not raw_value:
+        return None
+    try:
+        return datetime.fromisoformat(raw_value.replace("Z", "+00:00")).date()
+    except ValueError:
+        pass
+    try:
+        return date.fromisoformat(raw_value[:10])
+    except ValueError:
+        return None
+
+
+def _classify_holdings_freshness(age_days: int | None) -> str:
+    if age_days is None or age_days < 0:
+        return "unknown"
+    if age_days <= 7:
+        return "fresh"
+    if age_days <= 14:
+        return "aging"
+    if age_days <= 30:
+        return "stale"
+    return "very_stale"
 
 
 def build_dca_daily_plan(daily_plan: dict, profile: dict) -> dict:

@@ -74,7 +74,7 @@ def main() -> None:
 
     JSON_OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     JSON_OUTPUT_PATH.write_text(
-        json.dumps(context_pack, ensure_ascii=False, indent=2) + "\n",
+        "\ufeff" + json.dumps(context_pack, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
     MD_OUTPUT_PATH.write_text(markdown, encoding="utf-8-sig")

@@ -22,7 +22,7 @@ def load_json(path: str) -> dict:
         }
 
     try:
-        data = json.loads(json_path.read_text(encoding="utf-8"))
+        data = json.loads(json_path.read_text(encoding="utf-8-sig"))
     except json.JSONDecodeError as exc:
         return {
             "status": "error",
@@ -59,6 +59,7 @@ def build_daily_report_json(
         "report_type": "daily_portfolio_market_report",
         "generated_at": _utc_now(),
         "holdings_source": portfolio_snapshot.get("holdings_source", {}),
+        "holdings": portfolio_snapshot.get("holdings", []),
         "account_summary": {
             "total_assets": portfolio_snapshot.get("total_assets"),
             "invested_assets": portfolio_snapshot.get("invested_assets"),
@@ -77,6 +78,8 @@ def build_daily_report_json(
             ),
             "total_profit_loss": portfolio_snapshot.get("total_profit_loss"),
             "holdings_updated_at": portfolio_snapshot.get("holdings_updated_at"),
+            "holdings_age_days": portfolio_snapshot.get("holdings_age_days"),
+            "holdings_freshness_status": portfolio_snapshot.get("holdings_freshness_status"),
             "holdings_updated_at_status": portfolio_snapshot.get("holdings_updated_at_status"),
             "holdings_row_count": portfolio_snapshot.get("holdings_row_count"),
             "cash_reserve_note": (
@@ -145,6 +148,8 @@ def render_daily_report_markdown(report: dict) -> str:
                 ],
                 ["Total profit/loss", _format_number(report["account_summary"].get("total_profit_loss"))],
                 ["Holdings snapshot updated_at", _display(report["account_summary"].get("holdings_updated_at"))],
+                ["Holdings age days", _format_number(report["account_summary"].get("holdings_age_days"))],
+                ["Holdings freshness status", _display(report["account_summary"].get("holdings_freshness_status"))],
                 ["Holdings updated_at status", _display(report["account_summary"].get("holdings_updated_at_status"))],
                 ["Holdings row count", _format_number(report["account_summary"].get("holdings_row_count"))],
                 ["Cash reserve note", _display(report["account_summary"].get("cash_reserve_note"))],
@@ -154,6 +159,10 @@ def render_daily_report_markdown(report: dict) -> str:
                 ["Cash reserve source note", _display(report.get("holdings_source", {}).get("cash_reserve_note"))],
             ],
         ),
+        "",
+        "Holdings snapshot details:",
+        "",
+        _holdings_table(report.get("holdings", [])),
         "",
         "## 2. Allocation vs Target",
         "",
@@ -308,6 +317,18 @@ def _build_data_limitations(
             "holdings rows have mixed updated_at values: "
             f"{portfolio_snapshot.get('holdings_updated_at_values', [])}"
         )
+    elif portfolio_snapshot.get("holdings_updated_at_status") == "missing":
+        limitations.append("missing holdings updated_at: current holdings snapshot freshness is unknown.")
+
+    freshness_status = portfolio_snapshot.get("holdings_freshness_status")
+    if freshness_status in {"stale", "very_stale"}:
+        limitations.append(
+            "holdings snapshot is "
+            f"{freshness_status}: updated_at={portfolio_snapshot.get('holdings_updated_at')} "
+            f"age_days={portfolio_snapshot.get('holdings_age_days')}; account data is not real-time."
+        )
+    elif freshness_status == "unknown":
+        limitations.append("holdings snapshot freshness is unknown; account data should not be treated as real-time.")
 
     for section in ("market_data", "macro_data", "fx_data"):
         items = market_snapshot.get(section, {})
@@ -576,6 +597,31 @@ def _allocation_table(allocation_summary: dict) -> str:
 
     return _markdown_table(
         ["Asset class", "Current ex-cash", "Target", "Deviation", "Flag"],
+        rows,
+    )
+
+
+def _holdings_table(holdings: list[dict]) -> str:
+    if not isinstance(holdings, list) or not holdings:
+        return "No holdings detail recorded."
+
+    rows = []
+    for holding in holdings:
+        if not isinstance(holding, dict):
+            continue
+        rows.append(
+            [
+                _display(holding.get("asset_name")),
+                _display(holding.get("fund_code")),
+                _display(holding.get("asset_class")),
+                _format_number(holding.get("current_value")),
+                _format_number(holding.get("profit_loss")),
+                _display(holding.get("updated_at")),
+            ]
+        )
+
+    return _markdown_table(
+        ["Asset name", "Fund code", "Asset class", "Current value", "Profit/loss", "Updated at"],
         rows,
     )
 

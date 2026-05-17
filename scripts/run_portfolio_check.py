@@ -32,7 +32,7 @@ def main() -> None:
     print(formatted_json)
 
     DEFAULT_OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    DEFAULT_OUTPUT_PATH.write_text(formatted_json + "\n", encoding="utf-8")
+    DEFAULT_OUTPUT_PATH.write_text("\ufeff" + formatted_json + "\n", encoding="utf-8")
 
 
 def _select_holdings_file() -> tuple[Path, dict]:
