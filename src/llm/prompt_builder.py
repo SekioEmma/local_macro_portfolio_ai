@@ -188,6 +188,8 @@ def build_validation_repair_prompt(
             "",
             "上一版回答未通过本地规则评估。请把它当成纠错工单，而不是自由发挥。",
             f"- evaluator.status: {evaluator_status}",
+            "如果上一版回答的分析主线是正确的，保留正确段落，只补齐缺失概念并删除违规句子。",
+            "不要把一份基本合格的 analyst memo 重写成机械模板或表格式 fallback。",
             "不要输出 Thinking Process、Thinking...、推理草稿或内部推理链。",
             "不要给具体买卖金额或交易命令，不要预测短期涨跌，不要保证收益。",
             "不得说缺少组合配置，因为组合配置已经在 Mandatory Facts 中提供。",
@@ -246,6 +248,8 @@ def build_validation_repair_prompt(
             "",
             _required_output_format(eval_case),
             "",
+            "修复时优先保留自然段落化表达；不要新增 context pack 之外的数据、来源或实时行情。",
+            "",
         ]
     )
 
@@ -273,6 +277,7 @@ def build_compact_answer_prompt(
         "",
         "- 不得编造 context pack 外部市场数据、账户数据或来源。",
         "- 不得编造外部来源、实时更新时间、模型版本、规则库、Bloomberg/ISO、交易量、资金流入、波动率系数、风险评分或自动调仓。",
+        "- 不要写“数据来源”列表、合规声明、ISO 标准、规则校准时间、模型更新时间或自动生成声明；唯一来源只能是本地 context pack / current_holdings 快照。",
         "- 不得把 historical outcome 写成 forecast；historical outcome is not forecast。",
         "- 不得预测短期涨跌，不得保证收益。",
         "- 不得给具体买入、卖出、金额、仓位调整或交易命令。",
@@ -394,7 +399,7 @@ def build_compact_repair_prompt(
         "",
         _required_output_format(eval_case),
         "",
-        "只输出修复后的最终答案。不要解释你如何修复。",
+        "只输出修复后的最终答案。不要解释你如何修复。保留原回答中正确的分析段落，不要重写成机械模板。",
         "",
     ]
     return _truncate_prompt_preserving_end("\n".join(parts), max_chars)
@@ -459,11 +464,15 @@ def build_answer_style_section(answer_style: str, eval_case: dict[str, Any] | No
         return "\n".join(
             [
                 "- style: analyst_memo",
-                "- 使用自然、段落化的投研札记语气，不要机械堆表格。",
-                "- 推荐结构：核心判断 / 类比成立的部分 / 类比不成立的部分 / 真正风险在哪里 / 对用户判断的修正 / 需要观察的信号 / 对当前组合的含义 / 最终判断。",
+                "- 你可以写得像一份给个人长期投资者看的投研札记。不要像机械检查清单。",
+                "- 不要为了安全而省略分析；但所有事实必须来自 context，或者明确标注为一般性推理。",
+                "- 使用自然、段落化的语气，不要机械堆表格，不要输出 JSON-like key。",
+                "- 不要输出合规声明、ISO 标准、规则校准时间、模型更新时间、伪元数据或自动生成声明。",
+                "- 不要写“数据来源”小节或外部来源列表；如果需要说明来源，只能说基于本地 context pack / current_holdings 快照。",
+                "- 推荐结构：核心判断 / 相似点 / 差异点 / 风险本质 / 对用户判断的修正 / 观察信号 / 对组合含义 / 最终判断。",
                 "- 可以做情景分析，但不能给确定性预测，不能把 historical outcome 写成 forecast。",
                 "- 不编造最新价格、PE、市值、媒体来源、Reuters、FactSet、Goldman、Bloomberg 或 context 外数据。",
-                "- 如果 context 没有估值、价格或外部来源数据，必须说本地数据不足，不能补写。",
+                "- 如果 context 没有最新价格、PE、估值、市值或媒体引用，只能说“本地 context 未提供这些最新数据”，不能补写。",
                 "- 组合部分只能给观察方向、纪律化定投和再平衡框架；不得输出交易指令。",
                 "- 必须保留 current_holdings 快照日期、holdings_freshness_status 和 cash reserve 口径。",
                 "- 不得使用：需增加持仓、需减持、应买入、应卖出、立即调整。",
@@ -507,6 +516,22 @@ def _required_facts_for_repair_case(case_id: str) -> str:
             "必须逐项写：gold overweight / 高配 / 相对目标偏高，当前 21.64%，目标 10.00%，偏离 +11.64pp；可写避免继续主动加仓或等待年度/阈值再平衡评估，不写需减持。",
             "必须写：DCA monthly_required 1470，预算区间 1200-1500，状态 within_budget。",
             "必须写：不给具体买卖金额或交易命令，只给观察框架和风险提示。",
+        ],
+        "monthly_macro_portfolio_review": [
+            "必须写：这是一份周/月复盘口径，不是短期预测或交易指令。",
+            "必须写：当前 rule-based regime 为 warm_but_macro_sensitive，risk_level=medium / 中等风险水平。",
+            "必须写：current_holdings.csv 是本地手动快照，不是实时账户同步，并引用 holdings_updated_at 与 freshness。",
+            "必须写：cash reserve / 余额宝是现金准备金和扣款来源，不参与 5:2:2:1 目标仓位。",
+            "必须逐项写：sp500 和 nasdaq100 低配，short_bond 和 gold 高配。",
+            "必须写：DCA monthly_required 1470，预算区间 1200-1500，状态 within_budget。",
+            "必须写：context_health / 数据质量和缓存限制会影响判断强度。",
+        ],
+        "hot_market_dca_pause": [
+            "必须写：不提供暂停/加速定投的交易指令。",
+            "必须写：warm_but_macro_sensitive 只是规则判断，不是短期涨跌预测。",
+            "必须写：DCA monthly_required 1470，预算区间 1200-1500，状态 within_budget。",
+            "必须写：余额宝/cash reserve 是扣款来源和现金准备金，不等于应立即投资的闲置资金。",
+            "必须写：可以用纪律化定投、预算约束、再平衡框架和观察信号来评估。",
         ],
         "historical_outcome_not_forecast": [
             "必须写：historical outcome is not forecast。",
@@ -596,6 +621,24 @@ def build_eval_case_policy_section(case: dict[str, Any] | None, user_question: s
             "- 用“低配/高配/相对目标偏低/相对目标偏高”和“后续定投和再平衡时作为观察方向”。",
             "- 不使用“需增加持仓/需增加配置/需减持/需减少配置/应买入/应卖出/立即调整/逐步减持/增持/减持/操作建议/推荐行动/补仓/减仓/持仓调整/具体调整方案”。",
             "- 不使用“配置不足/配置过剩”，改用“低配/高配/相对目标偏低/相对目标偏高”。",
+        ],
+        "monthly_macro_portfolio_review": [
+            "- 必须采用周/月复盘口径，先讲宏观规则判断，再讲组合偏离和 DCA，不做短线预测。",
+            "- 必须说明 warm_but_macro_sensitive、risk_level=medium / 中等风险水平。",
+            "- 必须引用 current_holdings.csv、本地手动快照、holdings_updated_at、freshness。",
+            "- 必须说明 cash reserve / 余额宝是现金准备金和扣款来源，不纳入目标仓位。",
+            "- 必须引用 sp500、nasdaq100、short_bond、gold 的低配/高配方向。",
+            "- 必须说明 DCA monthly_required 1470、预算区间 1200-1500、within_budget。",
+            "- 必须说明 context_health、数据质量、缓存或数据限制会影响结论强度。",
+            "- 不得输出交易命令、具体买卖金额或确定性预测。",
+        ],
+        "hot_market_dca_pause": [
+            "- 必须回答：不能直接给“暂停/继续/加速”的交易命令。",
+            "- 必须说明市场偏热是 warm_but_macro_sensitive 的规则判断，不是短期涨跌预测。",
+            "- 必须接回 DCA 预算：monthly_required 1470，预算区间 1200-1500，status within_budget。",
+            "- 必须说明余额宝/cash reserve 是现金准备金和扣款来源，不等于应立即投入的闲置资金。",
+            "- 可以给纪律化定投、预算约束、再平衡阈值和观察信号框架。",
+            "- 不使用需增加持仓、需减持、应买入、应卖出、立即调整。",
         ],
         "historical_outcome_not_forecast": [
             "- 必须逐字出现“historical outcome is not forecast”或“历史结果不是预测”。",
@@ -696,6 +739,44 @@ def _required_output_format(eval_case: dict[str, Any] | None) -> str:
                 "禁止措辞：需增加持仓、需增加配置、需减持、需减少配置、应买入、应卖出、立即调整、逐步减持、增持、减持、操作建议、推荐行动、补仓、减仓、持仓调整、具体调整方案、配置不足、配置过剩；risk_level=medium 不得写成中性。",
             ]
         )
+    if case_id == "monthly_macro_portfolio_review":
+        return "\n".join(
+            [
+                "请用中文回答，采用周/月复盘式 analyst memo，可以自然段落化，不要只输出表格。",
+                "## 核心结论",
+                "说明当前是 warm_but_macro_sensitive / 偏热但宏观敏感，risk_level=medium / 中等风险水平；这不是短期预测。",
+                "## 宏观与市场温度",
+                "解释 equity_temperature、overall_regime、risk_level 的规则含义，并说明数据质量会影响结论强度。",
+                "## 组合快照",
+                "必须接回 current_holdings.csv、本地手动快照、holdings_updated_at、freshness、cash reserve 和 5:2:2:1 口径。",
+                "## 配置偏离与 DCA",
+                "必须说明 sp500/nasdaq100 低配，short_bond/gold 高配；必须说明 DCA monthly_required 1470、预算 1200-1500、status within_budget。",
+                "## 数据限制",
+                "说明 context_health、缓存/数据源失败、ETF proxy 或历史结果限制；historical outcome is not forecast。",
+                "## 观察信号",
+                "列出利率、通胀、盈利兑现、流动性、context_health、持仓 freshness 等观察项。",
+                "## 最终判断",
+                "给纪律化定投和再平衡框架层面的结论，不给交易命令或具体金额。",
+            ]
+        )
+    if case_id == "hot_market_dca_pause":
+        return "\n".join(
+            [
+                "请用中文回答，采用 analyst memo 风格，允许自然段落，不要写成买卖建议。",
+                "## 核心判断",
+                "必须说明不能直接给暂停/继续/加速定投的交易命令；市场偏热不是短期涨跌预测。",
+                "## 为什么不能机械暂停",
+                "说明 warm_but_macro_sensitive 是规则状态，长期定投应结合预算、纪律和再平衡阈值评估。",
+                "## DCA 与现金准备金",
+                "必须引用 DCA monthly_required 1470、预算 1200-1500、within_budget；说明余额宝/cash reserve 是现金准备金和扣款来源。",
+                "## 组合含义",
+                "接回 current_holdings.csv、本地快照 freshness、5:2:2:1 和配置偏离方向。",
+                "## 可观察信号",
+                "列出 market temperature、DGS10、CPI/PCE、盈利兑现、context_health、持仓 freshness。",
+                "## 边界",
+                "不写具体买卖金额，不使用需增加持仓/需减持/应买入/应卖出/立即调整，不预测短期涨跌。",
+            ]
+        )
     if case_id == "historical_outcome_not_forecast":
         return "\n".join(
             [
@@ -743,7 +824,8 @@ def _required_output_format(eval_case: dict[str, Any] | None) -> str:
     if case_id == "dotcom_ai_bubble_analyst_memo":
         return "\n".join(
             [
-                "请用中文回答，采用 analyst memo 风格，允许自然段落，不要只输出机械表格。",
+                "请用中文回答，采用 analyst memo 风格，允许自然段落，不要只输出机械表格，也不要像安全检查清单。",
+                "可以写得像一份给个人长期投资者看的投研札记；不要为了安全而省略分析。",
                 "## 核心判断",
                 "必须说明类比有合理性，但不是 2000 年简单复刻；不能断言危机必然到来。",
                 "## 类比成立的部分",
@@ -761,6 +843,8 @@ def _required_output_format(eval_case: dict[str, Any] | None) -> str:
                 "## 最终判断",
                 "必须写：不清仓、不追涨、不提高纳指权重，维持纪律化定投和再平衡框架。",
                 "禁止编造最新价格、PE、市值、Reuters、FactSet、Goldman、Bloomberg 或其他外部来源；禁止交易命令。",
+                "不要输出合规声明、ISO 标准、规则校准时间、模型更新时间、伪元数据或自动生成声明。",
+                "不要写“数据来源”小节，不要列 Bloomberg/Gartner/IDC/Wind；只能说本地 context 未提供这些最新外部数据。",
             ]
         )
     if case_id == "degraded_context_behavior":

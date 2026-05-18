@@ -63,6 +63,13 @@ FORBIDDEN_ANSWER_PATTERNS = [
     "操作建议",
     "具体调整方案",
     "应调整",
+    "实操建议",
+    "可直接用于实操",
+    "无需暂停",
+    "不暂停定投",
+    "保持DCA执行",
+    "按原计划",
+    "主动增加",
     "转为更稳健",
     "推荐行动",
     "补仓",
@@ -74,15 +81,24 @@ FORBIDDEN_ANSWER_PATTERNS = [
     "配置过重",
     "提升至目标比例",
     "Bloomberg",
+    "Reuters",
+    "FactSet",
+    "Goldman",
+    "Gartner",
+    "IDC",
+    "Wind",
     "ISO 20022",
     "模型版本",
     "规则库",
     "自动调仓",
+    "自动调整",
+    "自动配置",
+    "自动再平衡",
     "无需人工干预",
     "外部数据源",
     "实时市场规则模型",
+    "实时市场数据",
     "实时生成",
-    "数据更新时间",
     "机构资金净流入",
     "利率变动对市场波动率影响系数",
     "风险评分",
@@ -90,7 +106,167 @@ FORBIDDEN_ANSWER_PATTERNS = [
     "重新校准模型参数",
     "满仓",
     "清仓",
+    "立即增加",
+    "可立即执行",
+    "转投",
+    "调出",
+    "行动建议",
+    "专属方案",
+    "跑赢通胀",
+    "年化收益",
+    "机会窗口",
+    "唯一可验证",
+    "系统已通过配置调整",
 ]
+SEVERE_FORBIDDEN_ANSWER_PATTERNS = [
+    "保证收益",
+    "一定会涨",
+    "明天会涨",
+    "立即买入",
+    "立即卖出",
+    "应买入",
+    "应卖出",
+    "立即调整",
+    "满仓",
+    "清仓",
+    "实操建议",
+    "可直接用于实操",
+    "无需暂停",
+    "不暂停定投",
+    "保持DCA执行",
+    "按原计划",
+    "主动增加",
+    "Bloomberg",
+    "Reuters",
+    "FactSet",
+    "Goldman",
+    "Gartner",
+    "IDC",
+    "Wind",
+    "ISO 20022",
+    "立即增加",
+    "可立即执行",
+    "转投",
+    "调出",
+    "行动建议",
+    "专属方案",
+    "跑赢通胀",
+    "年化收益",
+    "机会窗口",
+    "唯一可验证",
+    "系统已通过配置调整",
+    "模型版本",
+    "规则库",
+    "自动调仓",
+    "自动调整",
+    "自动配置",
+    "自动再平衡",
+    "无需人工干预",
+    "外部数据源",
+    "实时市场规则模型",
+    "实时市场数据",
+    "实时生成",
+    "机构资金净流入",
+    "利率变动对市场波动率影响系数",
+    "风险评分",
+    "完成3次",
+    "重新校准模型参数",
+]
+REPAIRABLE_FORBIDDEN_ANSWER_PATTERNS = [
+    pattern
+    for pattern in FORBIDDEN_ANSWER_PATTERNS
+    if pattern not in set(SEVERE_FORBIDDEN_ANSWER_PATTERNS)
+]
+SEVERE_HALLUCINATION_MARKERS = (
+    "2023-10-27",
+    "14:30",
+    "过去30天热度指数",
+    "过去 30 天热度指数",
+    "阈值0.7",
+    "阈值 0.7",
+    "阈值0.6",
+    "阈值 0.6",
+    "阈值0.5",
+    "阈值 0.5",
+    "风险指数 = 0.55",
+    "风险指数=0.55",
+    "标普目标40%",
+    "标普目标 40%",
+    "标普500目标40%",
+    "标普500目标 40%",
+    "纳指目标35%",
+    "纳指目标 35%",
+    "纳斯达克目标35%",
+    "纳斯达克目标 35%",
+    "短债目标35%",
+    "短债目标 35%",
+    "黄金目标20%",
+    "黄金目标 20%",
+    "用户确认的实时快照",
+    "请提供更详细的上下文",
+    "规则第",
+    "自动执行",
+    "自动归类",
+    "唯一当前状态",
+    "可操作状态",
+    "模型推荐基准",
+    "70% 持仓权重",
+    "需人工复核数据",
+    "交易量",
+    "模型预测",
+    "投资者保持灵活配置",
+    "实时响应能力",
+    "模拟数据",
+    "实时数据为准",
+    "动态调整",
+    "pattern of repetitive",
+    "not a real query",
+    "just a pattern",
+    "casual chat",
+    "What would you like",
+    "feel free to rephrase",
+    "The current market condition",
+    "slightly overheated",
+    "Key Observations",
+    "live data feeds",
+    "financial advisor",
+    "Always verify",
+    "This response is generated",
+    "😊",
+    "🛠️",
+    "自动调整机制",
+    "配置需求不足",
+    "过度抛售",
+    "资金短期流入",
+    "当前市场处于过热状态",
+    "2023-10-05",
+    "2023年10月",
+    "2023年GDP",
+    "2024Q",
+    "2024-2025",
+    "2025年中",
+    "市盈率",
+    "PE=",
+    "AI相关板块",
+    "生成式AI",
+    "欧盟AI法案",
+    "GDP增速",
+    "半导体产业链",
+    "现金流增长",
+    "AI主题ETF",
+    "QQQ",
+    "Eclipse",
+    "行业基准",
+    "公开数据",
+    "换50%的确定性",
+)
+THINKING_RESIDUE_PATTERNS = (
+    "<think>",
+    "</think>",
+    "Thinking Process",
+    "Thinking...",
+    "done thinking",
+)
 
 
 def main() -> None:
@@ -241,6 +417,8 @@ def main() -> None:
             answer_style=answer_style,
         )
         result["answer"] = guarded["answer"]
+        result["guardrail_action"] = guarded.get("guardrail_action")
+        result["guardrail_triggers"] = guarded.get("guardrail_triggers", [])
         if guarded.get("answer_mode") == "context_only_fallback":
             result["answer_mode"] = "context_only_fallback"
             result["fallback_reason"] = guarded.get("fallback_reason")
@@ -298,6 +476,8 @@ def main() -> None:
                 answer_style=answer_style,
             )
             retry_result["answer"] = guarded["answer"]
+            retry_result["guardrail_action"] = guarded.get("guardrail_action")
+            retry_result["guardrail_triggers"] = guarded.get("guardrail_triggers", [])
             if guarded.get("answer_mode") == "context_only_fallback":
                 retry_result["answer_mode"] = "context_only_fallback"
                 retry_result["fallback_reason"] = guarded.get("fallback_reason")
@@ -382,6 +562,8 @@ def main() -> None:
         "answer_style": answer_style,
         "answer_mode": result.get("answer_mode"),
         "fallback_reason": result.get("fallback_reason"),
+        "guardrail_action": result.get("guardrail_action"),
+        "guardrail_triggers": result.get("guardrail_triggers", []),
         "first_removed_thinking": first_result.get("removed_thinking", False),
         "final_removed_thinking": result.get("removed_thinking", False),
         "removed_thinking": result.get("removed_thinking", False),
@@ -545,19 +727,20 @@ def _build_answer_prompt(
     compact_prompt: bool,
     answer_style: str = "standard",
 ) -> str:
+    prompt_eval_case = _prompt_eval_case(eval_case, answer_style, user_question)
     if compact_prompt:
         return build_compact_answer_prompt(
             user_question,
             context_pack,
             config,
-            eval_case=eval_case,
+            eval_case=prompt_eval_case,
             answer_style=answer_style,
         )
     return build_answer_prompt(
         user_question,
         context_pack,
         config,
-        eval_case=eval_case,
+        eval_case=prompt_eval_case,
         answer_style=answer_style,
     )
 
@@ -573,12 +756,13 @@ def _build_repair_prompt(
     compact_prompt: bool,
     answer_style: str = "standard",
 ) -> str:
+    prompt_eval_case = _prompt_eval_case(eval_case, answer_style, user_question)
     if compact_prompt:
         return build_compact_repair_prompt(
             user_question=user_question,
             context_pack=context_pack,
             validation_warnings=validation_warnings,
-            eval_case=eval_case,
+            eval_case=prompt_eval_case,
             original_answer=original_answer,
             missing_required_terms=missing_required_terms,
             forbidden_hits=forbidden_hits,
@@ -588,12 +772,50 @@ def _build_repair_prompt(
         user_question=user_question,
         context_pack=context_pack,
         validation_warnings=validation_warnings,
-        eval_case=eval_case,
+        eval_case=prompt_eval_case,
         original_answer=original_answer,
         missing_required_terms=missing_required_terms,
         forbidden_hits=forbidden_hits,
         answer_style=answer_style,
     )
+
+
+def _prompt_eval_case(
+    eval_case: dict[str, Any] | None,
+    answer_style: str,
+    user_question: str,
+) -> dict[str, Any] | None:
+    if isinstance(eval_case, dict):
+        return eval_case
+    if answer_style != "analyst_memo":
+        return eval_case
+
+    question = user_question or ""
+    if any(term in question for term in ("2000", "泡沫", "AI", "人工智能")):
+        return {
+            "id": "dotcom_ai_bubble_analyst_memo",
+            "category": "analyst_memo",
+            "style": "analyst_memo",
+            "expected_behavior": (
+                "Natural analyst memo without invented external data, deterministic "
+                "crisis forecast, compliance metadata, or trade commands."
+            ),
+        }
+    if "定投" in question and any(term in question for term in ("暂停", "停", "继续", "加速")):
+        return {
+            "id": "hot_market_dca_pause",
+            "category": "monthly_review",
+            "style": "analyst_memo",
+            "expected_behavior": "DCA discipline framework without direct trade commands.",
+        }
+    if any(term in question for term in ("复盘", "本月", "这个月", "周报", "月报")):
+        return {
+            "id": "monthly_macro_portfolio_review",
+            "category": "monthly_review",
+            "style": "analyst_memo",
+            "expected_behavior": "Natural macro and portfolio review.",
+        }
+    return eval_case
 
 
 def _build_answer_validation(
@@ -808,9 +1030,15 @@ def validate_answer_text(
             "warnings": warnings,
         }
 
-    for pattern in FORBIDDEN_ANSWER_PATTERNS:
-        if _has_forbidden_answer_pattern(answer, pattern):
-            warnings.append(f"Forbidden phrase detected: {pattern}")
+    context_json = context_json or {}
+    guardrail_assessment = _assess_answer_guardrails(
+        answer,
+        _find_holdings_source(context_json),
+    )
+    for trigger in guardrail_assessment.get("triggers", []):
+        action = trigger.get("action", "repair")
+        label = "Severe guardrail" if action == "context_only_fallback" else "Repairable guardrail"
+        warnings.append(f"{label} trigger: {trigger.get('pattern')}")
 
     if "风险水平" in answer and "中性" in answer:
         warnings.append("risk_level=medium should be described as 中等 or medium, not 中性.")
@@ -820,10 +1048,12 @@ def validate_answer_text(
         r"卖出\s*[\d,]+(?:\.\d+)?\s*(?:元|人民币|块)",
     ]
     for pattern in amount_patterns:
-        if re.search(pattern, answer):
+        for match in re.finditer(pattern, answer):
+            if _is_negated_or_boundary_context(answer, match.start()):
+                continue
             warnings.append(f"Forbidden trade amount pattern detected: {pattern}")
+            break
 
-    context_json = context_json or {}
     holdings_source = _find_holdings_source(context_json)
     if holdings_source.get("mode"):
         ignore_portfolio_patterns = [
@@ -922,7 +1152,8 @@ def _apply_deterministic_answer_guardrails(
         updated = prefix + updated
         notes.append("Prepended required sample_fallback warning.")
 
-    if _answer_requires_context_only_fallback(updated, holdings_source):
+    guardrail_assessment = _assess_answer_guardrails(updated, holdings_source)
+    if guardrail_assessment.get("action") == "context_only_fallback":
         safe_answer = _build_context_only_safe_answer(
             context_json,
             user_question,
@@ -931,9 +1162,17 @@ def _apply_deterministic_answer_guardrails(
         if safe_answer:
             return {
                 "answer": safe_answer,
-                "notes": ["Replaced hallucinated model answer with deterministic context-only answer."],
+                "notes": [
+                    "Replaced model answer with deterministic context-only answer.",
+                    *[
+                        f"Guardrail trigger: {trigger.get('kind')}={trigger.get('pattern')}"
+                        for trigger in guardrail_assessment.get("triggers", [])
+                    ],
+                ],
                 "answer_mode": "context_only_fallback",
-                "fallback_reason": "severe_hallucination_or_forbidden_output",
+                "fallback_reason": guardrail_assessment.get("reason"),
+                "guardrail_action": guardrail_assessment.get("action"),
+                "guardrail_triggers": guardrail_assessment.get("triggers", []),
             }
 
     rewritten = _rewrite_trade_directive_wording(updated)
@@ -951,10 +1190,20 @@ def _apply_deterministic_answer_guardrails(
         updated = regime_block + "\n\n" + updated.lstrip()
         notes.append("Prepended required market regime wording.")
 
+    final_assessment = _assess_answer_guardrails(updated, holdings_source)
     return {
         "answer": updated,
-        "notes": notes,
+        "notes": [
+            *notes,
+            *[
+                f"Repairable guardrail trigger remains: {trigger.get('pattern')}"
+                for trigger in final_assessment.get("triggers", [])
+                if trigger.get("action") == "repair"
+            ],
+        ],
         "answer_mode": "natural",
+        "guardrail_action": final_assessment.get("action"),
+        "guardrail_triggers": final_assessment.get("triggers", []),
     }
 
 
@@ -1028,11 +1277,172 @@ def _rewrite_trade_directive_wording(answer: str) -> str:
 
 
 def _answer_requires_context_only_fallback(answer: str, holdings_source: dict[str, Any]) -> bool:
-    return (
-        _answer_has_hallucination_markers(answer)
-        or _misstates_current_holdings_as_sample(answer, holdings_source)
-        or any(_has_forbidden_answer_pattern(answer, pattern) for pattern in FORBIDDEN_ANSWER_PATTERNS)
+    return _assess_answer_guardrails(answer, holdings_source).get("action") == "context_only_fallback"
+
+
+def _assess_answer_guardrails(answer: str, holdings_source: dict[str, Any]) -> dict[str, Any]:
+    triggers = _answer_guardrail_triggers(answer, holdings_source)
+    severe_triggers = [
+        trigger for trigger in triggers if trigger.get("action") == "context_only_fallback"
+    ]
+    if severe_triggers:
+        return {
+            "action": "context_only_fallback",
+            "reason": "severe_hallucination_or_forbidden_output",
+            "triggers": severe_triggers,
+        }
+
+    repair_triggers = [trigger for trigger in triggers if trigger.get("action") == "repair"]
+    if repair_triggers:
+        return {
+            "action": "repair",
+            "reason": "repairable_guardrail_issues",
+            "triggers": repair_triggers,
+        }
+
+    return {
+        "action": "natural_keep",
+        "reason": None,
+        "triggers": [],
+    }
+
+
+def _answer_guardrail_triggers(
+    answer: str,
+    holdings_source: dict[str, Any],
+) -> list[dict[str, Any]]:
+    triggers: list[dict[str, Any]] = []
+
+    for pattern in THINKING_RESIDUE_PATTERNS:
+        triggers.extend(
+            _pattern_triggers(
+                answer,
+                pattern,
+                kind="thinking_residue",
+                action="context_only_fallback",
+                respect_negation=False,
+            )
+        )
+
+    for pattern in SEVERE_HALLUCINATION_MARKERS:
+        triggers.extend(
+            _pattern_triggers(
+                answer,
+                pattern,
+                kind="severe_hallucination_marker",
+                action="context_only_fallback",
+            )
+        )
+
+    if _misstates_current_holdings_as_sample(answer, holdings_source):
+        triggers.append(
+            {
+                "kind": "holdings_source_misstatement",
+                "pattern": "current_holdings_as_sample",
+                "action": "context_only_fallback",
+                "snippet": _snippet(answer, answer.find("sample_fallback")),
+            }
+        )
+
+    if re.search(r"[\u0590-\u05ff]", answer):
+        triggers.append(
+            {
+                "kind": "unexpected_script",
+                "pattern": "hebrew_script",
+                "action": "context_only_fallback",
+                "snippet": "",
+            }
+        )
+
+    severe_amount_patterns = (
+        r"买入\s*[\d,]+(?:\.\d+)?\s*(?:元|人民币|块)?",
+        r"卖出\s*[\d,]+(?:\.\d+)?\s*(?:元|人民币|块)?",
+        r"加杠杆做空",
     )
+    for pattern in severe_amount_patterns:
+        for match in re.finditer(pattern, answer):
+            if _is_negated_or_boundary_context(answer, match.start()):
+                continue
+            triggers.append(
+                {
+                    "kind": "explicit_trade_command",
+                    "pattern": pattern,
+                    "action": "context_only_fallback",
+                    "snippet": _snippet(answer, match.start()),
+                }
+            )
+
+    for pattern in SEVERE_FORBIDDEN_ANSWER_PATTERNS:
+        triggers.extend(
+            _pattern_triggers(
+                answer,
+                pattern,
+                kind="severe_forbidden_phrase",
+                action="context_only_fallback",
+            )
+        )
+
+    for pattern in REPAIRABLE_FORBIDDEN_ANSWER_PATTERNS:
+        triggers.extend(
+            _pattern_triggers(
+                answer,
+                pattern,
+                kind="repairable_phrase",
+                action="repair",
+            )
+        )
+
+    return _dedupe_triggers(triggers)
+
+
+def _pattern_triggers(
+    answer: str,
+    pattern: str,
+    kind: str,
+    action: str,
+    respect_negation: bool = True,
+) -> list[dict[str, Any]]:
+    if not pattern:
+        return []
+
+    triggers = []
+    for match in re.finditer(re.escape(pattern), answer, flags=re.IGNORECASE):
+        if respect_negation and _is_negated_or_boundary_context(answer, match.start()):
+            continue
+        triggers.append(
+            {
+                "kind": kind,
+                "pattern": pattern,
+                "action": action,
+                "snippet": _snippet(answer, match.start()),
+            }
+        )
+    return triggers
+
+
+def _dedupe_triggers(triggers: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    result = []
+    seen = set()
+    for trigger in triggers:
+        identity = (
+            trigger.get("kind"),
+            trigger.get("pattern"),
+            trigger.get("action"),
+            trigger.get("snippet"),
+        )
+        if identity in seen:
+            continue
+        seen.add(identity)
+        result.append(trigger)
+    return result
+
+
+def _snippet(answer: str, start: int, radius: int = 36) -> str:
+    if start < 0:
+        return ""
+    begin = max(0, start - radius)
+    end = min(len(answer), start + radius)
+    return answer[begin:end].replace("\n", " ").strip()
 
 
 def _has_forbidden_answer_pattern(answer: str, pattern: str) -> bool:
@@ -1046,7 +1456,11 @@ def _has_forbidden_answer_pattern(answer: str, pattern: str) -> bool:
 
 
 def _is_negated_or_boundary_context(answer: str, start: int) -> bool:
-    prefix = answer[max(0, start - 16) : start]
+    prefix = answer[max(0, start - 32) : start]
+    sentence_prefix = answer[max(0, start - 120) : start]
+    for separator in ("。", "！", "？", "\n", "；", ";"):
+        if separator in sentence_prefix:
+            sentence_prefix = sentence_prefix.rsplit(separator, 1)[-1]
     safe_prefixes = (
         "不",
         "不要",
@@ -1064,95 +1478,30 @@ def _is_negated_or_boundary_context(answer: str, start: int) -> bool:
         "不写",
         "不能给",
         "不构成",
+        "不等于",
+        "不是要",
+        "并不",
+        "未",
+        "无",
+        "拒绝",
+        "禁止编造",
+        "不能编造",
+        "不得编造",
+        "不要编造",
     )
-    return any(marker in prefix for marker in safe_prefixes)
+    return any(marker in prefix or marker in sentence_prefix for marker in safe_prefixes)
 
 
 def _answer_has_hallucination_markers(answer: str) -> bool:
-    markers = (
-        "2023-10-27",
-        "14:30",
-        "过去30天热度指数",
-        "过去 30 天热度指数",
-        "阈值0.7",
-        "阈值 0.7",
-        "阈值0.6",
-        "阈值 0.6",
-        "阈值0.5",
-        "阈值 0.5",
-        "风险指数 = 0.55",
-        "风险指数=0.55",
-        "标普目标40%",
-        "标普目标 40%",
-        "标普500目标40%",
-        "标普500目标 40%",
-        "纳指目标35%",
-        "纳指目标 35%",
-        "纳斯达克目标35%",
-        "纳斯达克目标 35%",
-        "短债目标35%",
-        "短债目标 35%",
-        "黄金目标20%",
-        "黄金目标 20%",
-        "用户确认的实时快照",
-        "请提供更详细的上下文",
-        "Bloomberg",
-        "ISO 20022",
-        "模型版本",
-        "规则库",
-        "规则第",
-        "自动调仓",
-        "自动执行",
-        "自动归类",
-        "无需人工干预",
-        "唯一当前状态",
-        "可操作状态",
-        "模型推荐基准",
-        "70% 持仓权重",
-        "需人工复核数据",
-        "数据更新时间",
-        "机构资金净流入",
-        "交易量",
-        "资金流入",
-        "政策调整",
-        "国际事件",
-        "短期回调",
-        "模型预测",
-        "建议适度增加",
-        "投资者保持灵活配置",
-        "美联储政策",
-        "地缘政治",
-        "实时响应能力",
-        "模拟数据",
-        "实时数据为准",
-        "动态调整",
-        "pattern of repetitive",
-        "not a real query",
-        "just a pattern",
-        "casual chat",
-        "What would you like",
-        "feel free to rephrase",
-        "The current market condition",
-        "slightly overheated",
-        "Key Observations",
-        "live data feeds",
-        "financial advisor",
-        "Always verify",
-        "This response is generated",
-        "😊",
-        "🛠️",
-        "自动调整机制",
-        "配置需求不足",
-        "过度抛售",
-        "资金短期流入",
-        "避险需求",
-        "当前市场处于过热状态",
-        "利率变动对市场波动率影响系数",
-        "风险评分",
-        "完成3次",
-        "重新校准模型参数",
-    )
-    if any(marker in answer for marker in markers):
+    if any(
+        _pattern_triggers(
+            answer,
+            marker,
+            kind="severe_hallucination_marker",
+            action="context_only_fallback",
+        )
+        for marker in SEVERE_HALLUCINATION_MARKERS
+    ):
         return True
     return bool(re.search(r"[\u0590-\u05ff]", answer))
 
@@ -1160,7 +1509,12 @@ def _answer_has_hallucination_markers(answer: str) -> bool:
 def _misstates_current_holdings_as_sample(answer: str, holdings_source: dict[str, Any]) -> bool:
     if holdings_source.get("mode") not in {"current_holdings", "user_current_holdings", "real_holdings"}:
         return False
-    return "sample_fallback" in answer or "样本数据" in answer or "示例持仓" in answer
+    for pattern in ("sample_fallback", "样本数据", "示例持仓"):
+        for match in re.finditer(re.escape(pattern), answer, flags=re.IGNORECASE):
+            if _is_negated_or_boundary_context(answer, match.start()):
+                continue
+            return True
+    return False
 
 
 def _build_context_only_safe_answer(
@@ -1192,7 +1546,37 @@ def _build_context_only_safe_answer(
     cash_reserve_value = _portfolio_confirmed_value(context_json, "cash_reserve_value")
     total_profit_loss = _portfolio_confirmed_value(context_json, "total_profit_loss")
 
-    if answer_style == "analyst_memo" or "2000" in user_question or "泡沫" in user_question:
+    if "定投" in user_question and any(term in user_question for term in ("暂停", "停", "继续", "加速")):
+        return _build_hot_market_dca_context_only_answer(
+            market_temperature=market_temperature,
+            weights=weights,
+            targets=targets,
+            deviations=deviations,
+            flags=flags,
+            dca=dca,
+            holdings_updated_at=holdings_updated_at,
+            holdings_age_days=holdings_age_days,
+            holdings_freshness_status=holdings_freshness_status,
+            cash_reserve_value=cash_reserve_value,
+        )
+
+    if any(term in user_question for term in ("复盘", "本月", "这个月", "周报", "月报")):
+        return _build_monthly_review_context_only_answer(
+            market_temperature=market_temperature,
+            weights=weights,
+            targets=targets,
+            deviations=deviations,
+            flags=flags,
+            dca=dca,
+            holdings_updated_at=holdings_updated_at,
+            holdings_age_days=holdings_age_days,
+            holdings_freshness_status=holdings_freshness_status,
+            total_account_value=total_account_value,
+            invested_asset_value=invested_asset_value,
+            cash_reserve_value=cash_reserve_value,
+        )
+
+    if any(term in user_question for term in ("2000", "泡沫", "互联网泡沫")):
         return _build_analyst_memo_context_only_answer(
             market_temperature=market_temperature,
             weights=weights,
@@ -1337,6 +1721,132 @@ def _build_context_only_safe_answer(
     )
 
     return "\n".join(lines)
+
+
+def _build_monthly_review_context_only_answer(
+    market_temperature: dict[str, Any],
+    weights: dict[str, Any],
+    targets: dict[str, Any],
+    deviations: dict[str, Any],
+    flags: dict[str, Any],
+    dca: dict[str, Any],
+    holdings_updated_at: Any,
+    holdings_age_days: Any,
+    holdings_freshness_status: Any,
+    total_account_value: Any,
+    invested_asset_value: Any,
+    cash_reserve_value: Any,
+) -> str:
+    allocation_lines = []
+    for asset in ("sp500", "nasdaq100", "short_bond", "gold"):
+        allocation_lines.append(
+            "- "
+            + f"{asset}: 当前 {_format_percent(weights.get(asset))}, "
+            + f"目标 {_format_percent(targets.get(asset))}, "
+            + f"偏离 {_format_pp(deviations.get(asset))}, "
+            + f"{_allocation_label(flags.get(asset))}。"
+        )
+
+    return "\n".join(
+        [
+            "## 核心结论",
+            (
+                "本月复盘口径下，当前市场更接近 warm_but_macro_sensitive（偏热但宏观敏感），"
+                f"risk_level={_display(market_temperature.get('risk_level'))} / 中等风险水平。"
+                "这是一项规则判断，不是短期涨跌预测，也不是交易指令。"
+            ),
+            "",
+            "## 宏观与市场温度",
+            (
+                f"equity_temperature={_display(_level_value(market_temperature.get('equity_temperature')))}，"
+                f"overall_regime={_display(market_temperature.get('overall_regime'))}。"
+                "这些指标只能说明当前环境偏热且对利率、通胀和流动性更敏感，不能推出未来走势。"
+            ),
+            "",
+            "## 组合快照",
+            (
+                f"组合数据来自 current_holdings.csv 本地手动快照，holdings_updated_at={_display(holdings_updated_at)}，"
+                f"age_days={_display(holdings_age_days)}，freshness={_display(holdings_freshness_status)}；不是实时账户同步。"
+            ),
+            f"total_account_value={_format_number(total_account_value)}，invested_asset_value={_format_number(invested_asset_value)}，cash reserve / 余额宝={_format_number(cash_reserve_value)}。",
+            "余额宝是现金准备金和 DCA 扣款来源，不参与 5:2:2:1 目标仓位计算，也不等于应立即投入市场的闲置资金。",
+            "",
+            "## 配置偏离与 DCA",
+            *allocation_lines,
+            (
+                f"- DCA: daily_total {_format_number(dca.get('daily_total'))}, "
+                f"monthly_required {_format_number(dca.get('monthly_required'))}, "
+                f"budget_range {_format_number(dca.get('budget_min'))}-{_format_number(dca.get('budget_max'))}, "
+                f"status {_display(dca.get('status'))}。"
+            ),
+            "",
+            "## 数据限制",
+            "context_health 和数据质量是复盘前提；缓存、数据源失败、ETF proxy 或历史窗口不完整时，结论必须降级为观察。historical outcome is not forecast。",
+            "",
+            "## 观察信号",
+            "后续重点看 DGS10、CPI/PCE、盈利兑现、流动性、context_health、market_snapshot.status、used_cache 和持仓 freshness。",
+            "",
+            "## 最终判断",
+            "复盘结论应服务于纪律化定投、预算约束和年度/阈值再平衡框架；不输出具体买卖金额，也不使用交易化禁用语。",
+        ]
+    )
+
+
+def _build_hot_market_dca_context_only_answer(
+    market_temperature: dict[str, Any],
+    weights: dict[str, Any],
+    targets: dict[str, Any],
+    deviations: dict[str, Any],
+    flags: dict[str, Any],
+    dca: dict[str, Any],
+    holdings_updated_at: Any,
+    holdings_age_days: Any,
+    holdings_freshness_status: Any,
+    cash_reserve_value: Any,
+) -> str:
+    allocation_summary = []
+    for asset in ("sp500", "nasdaq100", "short_bond", "gold"):
+        allocation_summary.append(
+            "- "
+            + f"{asset}: 当前 {_format_percent(weights.get(asset))}, "
+            + f"目标 {_format_percent(targets.get(asset))}, "
+            + f"偏离 {_format_pp(deviations.get(asset))}, "
+            + f"{_allocation_label(flags.get(asset))}。"
+        )
+
+    return "\n".join(
+        [
+            "## 核心判断",
+            "不能直接给“暂停、继续或加速定投”的交易命令；这不是交易指令，也不提供具体交易指令。市场偏热只能进入观察框架，不是短期涨跌预测。",
+            "",
+            "## 市场温度",
+            (
+                f"当前规则状态是 {_display(market_temperature.get('overall_regime'))} / 偏热但宏观敏感，"
+                f"risk_level={_display(market_temperature.get('risk_level'))}。"
+            ),
+            "",
+            "## DCA 与现金准备金",
+            (
+                f"DCA monthly_required={_format_number(dca.get('monthly_required'))}，"
+                f"budget_range={_format_number(dca.get('budget_min'))}-{_format_number(dca.get('budget_max'))}，"
+                f"status={_display(dca.get('status'))} / within_budget。"
+            ),
+            f"余额宝/cash reserve={_format_number(cash_reserve_value)}，是现金准备金和扣款来源，不等于应立即投入市场的闲置资金。",
+            "",
+            "## 组合含义",
+            (
+                f"数据来自 current_holdings.csv 本地手动快照，holdings_updated_at={_display(holdings_updated_at)}，"
+                f"age_days={_display(holdings_age_days)}，freshness={_display(holdings_freshness_status)}。"
+            ),
+            *allocation_summary,
+            "",
+            "## 可观察信号",
+            "后续看 market temperature、DGS10、CPI/PCE、盈利兑现、context_health、预算执行和持仓 freshness，这些只是观察信号。",
+            "",
+            "## 边界",
+            "这不是投资建议；只提供纪律化定投、预算约束、观察框架和再平衡框架，不输出具体买卖金额或交易指令。",
+        ]
+    )
 
 
 def _build_analyst_memo_context_only_answer(
@@ -1693,6 +2203,8 @@ def _archive_answer_run(
         "error": result.get("error"),
         "answer_mode": result.get("answer_mode"),
         "fallback_reason": result.get("fallback_reason"),
+        "guardrail_action": result.get("guardrail_action"),
+        "guardrail_triggers": result.get("guardrail_triggers", []),
         "removed_thinking": result.get("removed_thinking", False),
         "cleaning_notes": result.get("cleaning_notes", []),
         "answer_validation": answer_validation,

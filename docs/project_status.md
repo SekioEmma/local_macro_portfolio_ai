@@ -487,6 +487,121 @@ qwen3:4b 结果：
 - LLM 不能直接计算仓位
 - LLM 不能写投资建议或短期涨跌预测
 
+### 阶段 6.0：真实持仓接入与余额宝扣款逻辑
+
+已完成：
+- data/holdings/current_holdings.csv 已作为本地真实持仓快照接入
+- current_holdings.csv 已被 Git 忽略，不进入仓库
+- holdings_source.mode 切换为 current_holdings
+- 余额宝识别为 cash reserve / 扣款准备金
+- 余额宝不参与 5:2:2:1 目标仓位计算
+- nasdaq100 合并 019172 与 270042
+- DCA daily_total = 70
+- estimated_monthly_dca ≈ 1470
+- monthly transfer range = 1200-1500
+- DCA status = within_budget
+
+当前真实持仓口径：
+- total_account_value including cash ≈ 10886.45
+- invested_asset_value excluding cash ≈ 8757.55
+- cash_reserve_value ≈ 2128.90
+- sp500 ≈ 29.88%，目标 50%，低配约 -20.12pp
+- nasdaq100 ≈ 12.65%，目标 20%，低配约 -7.35pp
+- short_bond ≈ 35.83%，目标 20%，高配约 +15.83pp
+- gold ≈ 21.64%，目标 10%，高配约 +11.64pp
+
+已明确限制：
+- 不提交 current_holdings.csv
+- 不把余额宝解释为应立即投入市场的闲置资金
+- 不输出具体买卖金额
+- 不输出“需增加持仓 / 需减持 / 应买入 / 应卖出 / 立即调整”
+
+### 阶段 6.1：真实持仓主链路一致性回归
+
+已完成：
+- portfolio_snapshot.json 使用 current_holdings 口径
+- daily_report.md 使用 current_holdings 口径
+- llm_context_pack.md 使用 current_holdings 口径
+- ask_local_ai.py 回答使用 current_holdings 口径
+- 四个入口不再显示 sample_fallback
+- 现金 / 余额宝统一作为 cash reserve
+- Allocation vs Target 统一按 excluding cash 计算
+- latest_llm_answer.md 不再输出 sample_fallback 警告
+- latest_llm_answer.md 明确本地持仓快照不是实时账户同步
+
+已明确限制：
+- outputs/reports 真实报告不提交
+- outputs/answers 真实问答归档不提交
+- 不把本地手动截图快照说成实时同步账户
+
+### 阶段 6.2：持仓快照 freshness 与更新流程
+
+已完成：
+- portfolio_snapshot.json 增加 holdings_updated_at
+- portfolio_snapshot.json 增加 holdings_age_days
+- portfolio_snapshot.json 增加 holdings_freshness_status
+- portfolio_snapshot.json 增加 holdings_updated_at_status
+- daily_report.md 显示持仓快照日期与 freshness
+- llm_context_pack.md 显示持仓快照日期与 freshness
+- ask_local_ai.py 提示基于本地持仓快照，不是实时同步
+- docs/holdings_update_workflow.md 记录持仓更新流程
+- 修复 current_holdings.csv 中文基金名读取乱码
+- 增加 hallucination guardrail：严重跑题或编造时使用 context-only fallback 完整替换最终答案
+
+freshness 规则：
+- 0-7 天：fresh
+- 8-14 天：aging
+- 15-30 天：stale
+- >30 天：very_stale
+- 无法解析日期：unknown
+
+当前持仓快照：
+- holdings_updated_at = 2026-05-14
+- holdings_freshness_status 按运行日期动态计算
+- current_holdings.csv 是用户本地手动录入快照，不是实时账户同步
+
+已明确限制：
+- 不把旧持仓快照当实时账户
+- 不提交 current_holdings.csv
+- 不提交 outputs 真实结果
+- 不编造外部行情、阈值、日期或目标比例
+
+### 阶段 6.3：Analyst Memo 风格层与 fallback 分层
+
+当前状态：
+- 已实现 analyst_memo 回答模式
+- ask_local_ai.py 支持 --style standard
+- ask_local_ai.py 支持 --style analyst_memo
+- 新增 configs/answer_style.yaml
+- 新增 docs/answer_style_guide.md
+- analyst_memo 适用于宏观、市场类比、估值、历史周期、组合影响类问题
+- 保留默认 qwen3:4b
+- 保留 clean_model_answer / strip_thinking_output
+- 保留 hallucination guardrail 与 context-only fallback
+
+fallback 分层：
+- answer_mode = natural：模型自然回答通过校验
+- answer_mode = repaired：轻微缺项后 repair 通过
+- answer_mode = context_only_fallback：严重幻觉、跑题、编造外部数据、错误目标比例、Thinking 残留或交易化措辞时整段替换
+
+已完成验证：
+- analyst_memo 测试问题可生成安全答案
+- latest_llm_answer.md 无 Thinking / Thinking Process / done thinking
+- 不再出现 sample_fallback
+- 不编造最新价格、PE、市值、媒体来源
+- 不把“危机一两年内到来”写成确定性预测
+- 可接回 current_holdings、余额宝 cash reserve、5:2:2:1 目标配置与持仓 freshness
+- run_llm_eval.py 更新为 7 个 case
+- run_llm_eval.py 当前验收结果：total=7, passed=7, failed=0, pass_rate=1.0
+
+后续注意：
+- analyst_memo 当前以安全性优先
+- 如果模型自然回答触发严重 guardrail，会使用 context_only_fallback
+- 后续可继续优化 first-pass 自然回答质量，减少 fallback 依赖
+- 不切换默认模型
+- 不接云端 API
+- 不训练或微调模型
+
 ## 当前不做
 
 - 不接自动交易
@@ -502,6 +617,6 @@ qwen3:4b 结果：
 
 ## 下一阶段计划
 
-阶段 5.8：默认 qwen3:4b 后的上下文压缩与主链路稳定性优化。
+阶段 6.4：Analyst Memo first-pass 质量与 fallback 依赖优化。
 
-阶段 5.7 已完成默认模型切换。下一阶段优先观察默认 qwen3:4b 在真实主链路中的稳定性，并继续优化 context compression、repair 触发与 evaluator 规则，同时仍需遵守不接云端 API、不训练模型、不预测未来、不写投资建议的边界。
+阶段 6.3 已完成 analyst_memo 风格层与 fallback 分层。下一阶段优先提高 qwen3:4b 在复杂投研类问题中的自然回答质量，减少 context_only_fallback 触发，同时继续保持不接云端 API、不训练模型、不预测未来、不写具体投资建议、不提交真实 outputs 或 current_holdings.csv 的边界。

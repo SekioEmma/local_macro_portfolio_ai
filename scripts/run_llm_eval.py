@@ -44,10 +44,12 @@ def main() -> None:
         case_records.append(record)
 
     summary = summarize_eval_results(results)
+    answer_mode_summary = _summarize_answer_modes(case_records)
+    report_summary = {**summary, **answer_mode_summary}
     generated_at = datetime.now(timezone.utc).isoformat()
     summary_payload = {
         "generated_at": generated_at,
-        **summary,
+        **report_summary,
         "results": results,
     }
 
@@ -57,12 +59,12 @@ def main() -> None:
         json.dumps(summary_payload, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
-    _write_utf8_markdown(report_path, render_eval_report(generated_at, summary, case_records))
+    _write_utf8_markdown(report_path, render_eval_report(generated_at, report_summary, case_records))
 
     print(
         json.dumps(
             {
-                **summary,
+                **report_summary,
                 "generated_at": generated_at,
                 "eval_dir": str(eval_dir),
                 "summary_path": str(summary_path),
@@ -81,18 +83,21 @@ def _run_case(case: dict[str, Any], eval_dir: Path) -> dict[str, Any]:
     case_id = str(case.get("id", "unknown"))
     question = str(case.get("question", ""))
     first_completed = _call_ask(question, case)
+    first_ask_summary = _extract_ask_summary(first_completed.stdout)
     first_answer = _answer_from_run(first_completed)
     first_eval_result = _evaluate_with_subprocess_status(first_answer, case, first_completed)
 
     repair_used = False
     final_answer = first_answer
     final_completed = None
+    final_ask_summary = first_ask_summary
     final_eval_result = first_eval_result
 
     if first_eval_result.get("status") == "fail":
         repair_used = True
         repair_case = _case_with_repair_context(case, first_answer, first_eval_result)
         final_completed = _call_ask(question, repair_case)
+        final_ask_summary = _extract_ask_summary(final_completed.stdout)
         repaired_answer = _answer_from_run(final_completed)
         if repaired_answer:
             final_answer = repaired_answer
@@ -104,7 +109,16 @@ def _run_case(case: dict[str, Any], eval_dir: Path) -> dict[str, Any]:
 
     final_eval_result = {
         **final_eval_result,
-        "repair_used": repair_used,
+        "repair_used": repair_used or bool(final_ask_summary.get("repair_used")),
+        "external_repair_used": repair_used,
+        "internal_repair_used": bool(final_ask_summary.get("repair_used")),
+        "repair_success": bool(final_ask_summary.get("repair_success")),
+        "answer_mode": final_ask_summary.get("answer_mode"),
+        "fallback_reason": final_ask_summary.get("fallback_reason"),
+        "used_context_only_fallback": final_ask_summary.get("answer_mode") == "context_only_fallback",
+        "guardrail_action": final_ask_summary.get("guardrail_action"),
+        "guardrail_triggers": final_ask_summary.get("guardrail_triggers", []),
+        "thinking_removed": bool(final_ask_summary.get("removed_thinking")),
     }
 
     first_answer_path = eval_dir / f"{case_id}_first_answer.md"
@@ -117,6 +131,8 @@ def _run_case(case: dict[str, Any], eval_dir: Path) -> dict[str, Any]:
             {
                 "case": case,
                 "repair_used": repair_used,
+                "first_ask_summary": first_ask_summary,
+                "final_ask_summary": final_ask_summary,
                 "first_eval_result": first_eval_result,
                 "final_eval_result": final_eval_result,
                 "eval_result": final_eval_result,
@@ -151,7 +167,10 @@ def _run_case(case: dict[str, Any], eval_dir: Path) -> dict[str, Any]:
         "eval_path": str(eval_path),
         "first_eval_result": first_eval_result,
         "eval_result": final_eval_result,
-        "repair_used": repair_used,
+        "repair_used": final_eval_result.get("repair_used", repair_used),
+        "answer_mode": final_eval_result.get("answer_mode"),
+        "fallback_reason": final_eval_result.get("fallback_reason"),
+        "repair_success": final_eval_result.get("repair_success", False),
     }
 
 
@@ -200,6 +219,39 @@ def _evaluate_with_subprocess_status(
     return eval_result
 
 
+def _extract_ask_summary(stdout: str) -> dict[str, Any]:
+    text = (stdout or "").strip()
+    for index in range(len(text) - 1, -1, -1):
+        if text[index] != "{":
+            continue
+        try:
+            payload = json.loads(text[index:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            return payload
+    return {}
+
+
+def _summarize_answer_modes(case_records: list[dict[str, Any]]) -> dict[str, Any]:
+    modes = [
+        record.get("eval_result", {}).get("answer_mode") or "unknown"
+        for record in case_records
+    ]
+    return {
+        "natural_count": sum(1 for mode in modes if mode == "natural"),
+        "repaired_count": sum(1 for mode in modes if mode == "repaired"),
+        "context_only_fallback_count": sum(
+            1 for mode in modes if mode == "context_only_fallback"
+        ),
+        "unknown_answer_mode_count": sum(1 for mode in modes if mode == "unknown"),
+        "answer_mode_counts": {
+            mode: modes.count(mode)
+            for mode in sorted(set(modes))
+        },
+    }
+
+
 def _case_with_repair_context(
     case: dict[str, Any],
     original_answer: str,
@@ -234,16 +286,18 @@ def render_eval_report(
         f"Generated at: {generated_at}",
         "",
         "## Summary",
-        "| total | passed | failed | warnings | pass_rate |",
-        "| --- | --- | --- | --- | --- |",
+        "| total | passed | failed | warnings | pass_rate | natural | repaired | fallback |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
         (
             f"| {summary['total']} | {summary['passed']} | {summary['failed']} | "
-            f"{summary['warnings']} | {summary['pass_rate']} |"
+            f"{summary['warnings']} | {summary['pass_rate']} | "
+            f"{summary.get('natural_count', 0)} | {summary.get('repaired_count', 0)} | "
+            f"{summary.get('context_only_fallback_count', 0)} |"
         ),
         "",
         "## Case Results",
-        "| case_id | category | status | score | repair_used | key failures |",
-        "| --- | --- | --- | --- | --- | --- |",
+        "| case_id | category | status | score | answer_mode | fallback_reason | repair_used | repair_success | key failures |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
 
     for record in case_records:
@@ -258,7 +312,10 @@ def render_eval_report(
                     _cell(case.get("category")),
                     _cell(result.get("status")),
                     _cell(result.get("score")),
+                    _cell(result.get("answer_mode")),
+                    _cell(result.get("fallback_reason")),
                     _cell(record.get("repair_used", False)),
+                    _cell(record.get("repair_success", False)),
                     _cell(failures),
                 ]
             )

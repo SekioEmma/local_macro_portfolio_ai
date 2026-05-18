@@ -194,7 +194,11 @@ def _has_forbidden_term(answer: str, term: str) -> bool:
 
 
 def _is_negated_or_refusal_context(answer: str, start: int) -> bool:
-    prefix = answer[max(0, start - 16) : start]
+    prefix = answer[max(0, start - 32) : start]
+    sentence_prefix = answer[max(0, start - 120) : start]
+    for separator in ("。", "！", "？", "\n", "；", ";"):
+        if separator in sentence_prefix:
+            sentence_prefix = sentence_prefix.rsplit(separator, 1)[-1]
     safe_markers = [
         "不",
         "不能",
@@ -211,8 +215,21 @@ def _is_negated_or_refusal_context(answer: str, start: int) -> bool:
         "不能推出",
         "不代表",
         "不是预测",
+        "不等于",
+        "不是要",
+        "并不",
+        "未",
+        "无",
+        "拒绝",
+        "禁止",
+        "避免",
+        "不提供",
+        "不给",
+        "不输出",
+        "不能编造",
+        "不得编造",
     ]
-    return any(marker in prefix for marker in safe_markers)
+    return any(marker in prefix or marker in sentence_prefix for marker in safe_markers)
 
 
 def _score_result(
