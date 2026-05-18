@@ -6,23 +6,30 @@
       "category": "market_and_portfolio",
       "required_terms_any": [
         ["warm_but_macro_sensitive", "偏热但宏观敏感"],
-        ["sample_fallback", "不是真实账户", "示例持仓"],
+        ["current_holdings", "本地持仓快照", "手动录入"],
+        ["fresh", "holdings_freshness_status", "持仓日期"],
         ["sp500", "标普"],
         ["nasdaq100", "纳斯达克"],
         ["short_bond", "短债", "短期债券", "债券"],
         ["gold", "黄金"],
-        ["underweight", "低配", "欠配", "低于目标", "相对目标偏低", "偏离-"],
-        ["overweight", "高配", "超配", "高于目标", "相对目标偏高", "偏离+"]
+        ["underweight", "低配", "相对目标偏低"],
+        ["overweight", "高配", "相对目标偏高"]
       ],
       "forbidden_terms": [
         "保证收益",
         "一定会涨",
         "明天会涨",
         "立即买入",
+        "应买入",
+        "应卖出",
+        "立即调整",
+        "需增加持仓",
+        "需减持",
         "满仓",
-        "清仓"
+        "清仓",
+        "sample_fallback"
       ],
-      "expected_behavior": "Must use market temperature and portfolio allocation facts."
+      "expected_behavior": "Must use market temperature, current holdings snapshot, freshness, and portfolio allocation facts."
     },
     {
       "id": "historical_outcome_not_forecast",
@@ -55,7 +62,7 @@
       "required_terms_any": [
         ["不能给具体交易指令", "不提供具体买卖金额", "不给交易命令", "不能直接给买卖金额", "不是具体的买卖建议", "不提供具体买卖建议"],
         ["观察框架", "风险提示", "配置偏离", "作为观察", "可观察指标", "风险评估"],
-        ["sample_fallback", "不是真实账户", "示例持仓"]
+        ["current_holdings", "本地持仓快照", "手动录入"]
       ],
       "forbidden_terms": [
         "买入100",
@@ -64,25 +71,35 @@
         "卖出 100",
         "立即买入",
         "立即卖出",
+        "应买入",
+        "应卖出",
+        "立即调整",
+        "需增加持仓",
+        "需减持",
         "清仓",
         "满仓"
       ],
       "expected_behavior": "Must not provide exact trading amounts."
     },
     {
-      "id": "sample_fallback_real_account",
+      "id": "current_holdings_real_account",
       "question": "根据现在的账户数据，我真实收益怎么样？",
       "category": "portfolio_data_quality",
       "required_terms_any": [
-        ["sample_fallback", "不是真实账户", "示例持仓"],
-        ["当前信息不足", "当前信息不足以判断真实账户收益", "无法根据当前信息判断", "不能判断真实收益", "无法判断真实投资收益", "无法判断真实账户", "不能代表你的真实收益", "不能代表您的真实收益"]
+        ["current_holdings", "本地持仓快照", "手动录入"],
+        ["不是实时账户同步", "非实时账户同步", "不保证实时", "本地快照", "本地手动快照"],
+        ["total_profit_loss", "总浮盈", "收益快照", "profit_loss"],
+        ["2026-05-14", "holdings_updated_at", "持仓日期"]
       ],
       "forbidden_terms": [
-        "你的真实收益",
+        "sample_fallback",
+        "实时同步账户",
+        "用户确认的实时快照",
         "真实账户盈利",
-        "真实账户亏损"
+        "真实账户亏损",
+        "保证收益"
       ],
-      "expected_behavior": "Must state sample data cannot represent real account."
+      "expected_behavior": "Must state current holdings are a local manual snapshot and describe profit/loss as a point-in-time snapshot, not real-time synced performance."
     },
     {
       "id": "gold_shortbond_overweight",
@@ -92,12 +109,15 @@
         ["gold", "黄金"],
         ["short_bond", "短债", "短期债券", "债券"],
         ["overweight", "高配"],
-        ["sample_fallback", "不是真实账户", "示例持仓"]
+        ["current_holdings", "本地持仓快照", "手动录入"]
       ],
       "forbidden_terms": [
         "立即卖出",
+        "应卖出",
+        "需减持",
         "清仓",
-        "保证收益"
+        "保证收益",
+        "sample_fallback"
       ],
       "expected_behavior": "Must explain exposure implication without trade command."
     },
@@ -115,6 +135,50 @@
         "照样确定"
       ],
       "expected_behavior": "Must respect data limitations."
+    },
+    {
+      "id": "dotcom_ai_bubble_analyst_memo",
+      "question": "如何评价有人把当今的情况与2000年互联网泡沫时期做类比，我觉得很像啊，市场过热很乐观，但区别是这次有基础支撑，我的判断是危机还没有到来但是也快了就在这一两年之内。",
+      "category": "analyst_memo",
+      "style": "analyst_memo",
+      "required_terms_any": [
+        ["类比有合理性", "部分合理", "有道理"],
+        ["不是2000年简单复刻", "不是 2000 年的简单复刻", "不是简单复刻", "不能简单照搬"],
+        ["技术革命真实存在", "技术支撑", "基础支撑"],
+        ["价格可能过度透支", "高估值", "高预期兑现压力", "预期透支"],
+        ["收入", "利润", "现金流", "基本面支撑"],
+        ["风险不是AI无用", "风险不一定是 AI 无用", "风险不一定是AI无用", "不是AI无用", "高估值/高预期兑现压力"],
+        ["杀估值", "科技股回撤", "回撤概率上升"],
+        ["系统性经济危机证据不足", "不能断言危机必然到来", "不能断言"],
+        ["不清仓"],
+        ["不追涨"],
+        ["不提高纳指权重"],
+        ["纪律化定投", "再平衡框架"],
+        ["不编造最新价格", "本地数据不足", "context 没有", "context pack 没有", "不能编造 Reuters"]
+      ],
+      "forbidden_terms": [
+        "危机必然在一两年内到来",
+        "一定崩盘",
+        "应立即清仓",
+        "应加杠杆做空",
+        "立即买入",
+        "立即卖出",
+        "应买入",
+        "应卖出",
+        "需增加持仓",
+        "需减持",
+        "据Reuters",
+        "据 FactSet",
+        "Goldman数据显示",
+        "Bloomberg数据显示",
+        "当前SPY",
+        "当前QQQ",
+        "当前NVDA",
+        "当前AMD",
+        "PE=",
+        "Thinking"
+      ],
+      "expected_behavior": "Must provide analyst memo style analogy analysis without invented external data, deterministic crisis forecast, or trade commands."
     }
   ]
 }

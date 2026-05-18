@@ -1,0 +1,25 @@
+default_style: "standard"
+
+styles:
+  standard:
+    description: "默认问答。强调事实、边界、组合口径，适合短问题和工具型查询。"
+
+  analyst_memo:
+    description: "投研札记式长分析。适合宏观、市场类比、估值、历史周期、组合影响类问题。"
+    structure:
+      - 核心判断
+      - 类比成立的部分
+      - 类比不成立的部分
+      - 真正风险在哪里
+      - 对用户判断的修正
+      - 需要观察的信号
+      - 对当前组合的含义
+      - 最终判断
+    constraints:
+      - 不编造当前价格、PE、市值、媒体来源
+      - context 没有的数据必须说明本地数据不足
+      - 可以做情景分析，但不能给确定性预测
+      - 组合部分只能给观察方向、定投纪律和再平衡框架
+      - 保留 current_holdings 快照日期与 freshness
+      - 保留 cash reserve 口径
+      - 不输出交易指令

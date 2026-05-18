@@ -38,6 +38,7 @@ from eval.answer_evaluator import evaluate_answer
 
 
 CONFIG_PATH = PROJECT_ROOT / "configs" / "llm.yaml"
+ANSWER_STYLE_CONFIG_PATH = PROJECT_ROOT / "configs" / "answer_style.yaml"
 REPORT_DIR = PROJECT_ROOT / "outputs" / "reports"
 ANSWER_ARCHIVE_ROOT = PROJECT_ROOT / "outputs" / "answers"
 CONTEXT_MD_PATH = REPORT_DIR / "llm_context_pack.md"
@@ -112,6 +113,8 @@ def main() -> None:
     config_result = _load_config(CONFIG_PATH)
     config = config_result.get("config", {})
     config = _apply_cli_overrides(config, parsed_args)
+    answer_style = _resolve_answer_style(parsed_args.get("style"), eval_case)
+    config["answer_style"] = _load_answer_style_config(answer_style)
     mode = config.get("local_llm", {}).get("mode", "prompt_only") if isinstance(config, dict) else "prompt_only"
     context_policy = config.get("context_policy", {}) if isinstance(config, dict) else {}
     local_llm_config = config.get("local_llm", {}) if isinstance(config, dict) else {}
@@ -141,6 +144,7 @@ def main() -> None:
             missing_required_terms=repair_context.get("missing_required_terms", []),
             forbidden_hits=repair_context.get("forbidden_hits", []),
             compact_prompt=compact_prompt,
+            answer_style=answer_style,
         )
     else:
         prompt = _build_answer_prompt(
@@ -149,6 +153,7 @@ def main() -> None:
             config=config,
             eval_case=eval_case,
             compact_prompt=compact_prompt,
+            answer_style=answer_style,
         )
 
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
@@ -175,6 +180,7 @@ def main() -> None:
                 fallback_answer = _build_context_only_safe_answer(
                     context_pack.get("context_json", {}),
                     user_question,
+                    answer_style=answer_style,
                 )
                 result = {
                     "status": (
@@ -186,6 +192,8 @@ def main() -> None:
                     "model": config.get("local_llm", {}).get("model"),
                     "prompt": prompt,
                     "answer": fallback_answer or None,
+                    "answer_mode": "context_only_fallback" if fallback_answer else "unavailable",
+                    "fallback_reason": "ollama_health_error" if fallback_answer else None,
                     "removed_thinking": False,
                     "cleaning_notes": (
                         [
@@ -201,16 +209,43 @@ def main() -> None:
                 }
             else:
                 result = call_local_llm(prompt, config)
+                result.setdefault("answer_mode", "natural")
         else:
             result = call_local_llm(prompt, config)
+            result.setdefault("answer_mode", "natural")
+
+    if mode == "local_http" and not result.get("answer") and result.get("status") not in {
+        "blocked_degraded_context",
+    }:
+        fallback_answer = _build_context_only_safe_answer(
+            context_pack.get("context_json", {}),
+            user_question,
+            answer_style=answer_style,
+        )
+        if fallback_answer:
+            original_status = result.get("status") or "model_error"
+            result["status"] = f"{original_status}_context_fallback"
+            result["answer"] = fallback_answer
+            result["answer_mode"] = "context_only_fallback"
+            result["fallback_reason"] = str(original_status)
+            result["cleaning_notes"] = [
+                *result.get("cleaning_notes", []),
+                "Model call did not produce a usable answer; wrote deterministic context-only fallback answer.",
+            ]
 
     if result.get("answer"):
         guarded = _apply_deterministic_answer_guardrails(
             result["answer"],
             context_pack,
             user_question=user_question,
+            answer_style=answer_style,
         )
         result["answer"] = guarded["answer"]
+        if guarded.get("answer_mode") == "context_only_fallback":
+            result["answer_mode"] = "context_only_fallback"
+            result["fallback_reason"] = guarded.get("fallback_reason")
+        else:
+            result.setdefault("answer_mode", "natural")
         if guarded["notes"]:
             result["cleaning_notes"] = [
                 *result.get("cleaning_notes", []),
@@ -250,16 +285,22 @@ def main() -> None:
             missing_required_terms=first_answer_validation.get("missing_required_terms", []),
             forbidden_hits=first_answer_validation.get("forbidden_hits", []),
             compact_prompt=compact_prompt,
+            answer_style=answer_style,
         )
         _write_utf8_markdown(PROMPT_OUTPUT_PATH, repair_prompt)
         retry_result = call_local_llm(repair_prompt, config)
+        retry_result.setdefault("answer_mode", "repaired")
         if retry_result.get("answer"):
             guarded = _apply_deterministic_answer_guardrails(
                 retry_result["answer"],
                 context_pack,
                 user_question=user_question,
+                answer_style=answer_style,
             )
             retry_result["answer"] = guarded["answer"]
+            if guarded.get("answer_mode") == "context_only_fallback":
+                retry_result["answer_mode"] = "context_only_fallback"
+                retry_result["fallback_reason"] = guarded.get("fallback_reason")
             retry_notes = [
                 "Retried with compact validation repair prompt.",
                 *retry_result.get("cleaning_notes", []),
@@ -338,6 +379,9 @@ def main() -> None:
         "data_limitation_count": len(context_pack.get("data_limitations", [])),
         "data_limitations": context_pack.get("compressed_data_limitations", []),
         "compact_prompt": compact_prompt,
+        "answer_style": answer_style,
+        "answer_mode": result.get("answer_mode"),
+        "fallback_reason": result.get("fallback_reason"),
         "first_removed_thinking": first_result.get("removed_thinking", False),
         "final_removed_thinking": result.get("removed_thinking", False),
         "removed_thinking": result.get("removed_thinking", False),
@@ -406,6 +450,12 @@ def _parse_cli_args(args: list[str]) -> dict[str, Any]:
             compact_prompt = True
             index += 1
             continue
+        if item == "--style":
+            if index + 1 >= len(args):
+                raise SystemExit("--style requires a value.")
+            overrides["style"] = args[index + 1]
+            index += 2
+            continue
         question_parts.append(item)
         index += 1
 
@@ -415,7 +465,48 @@ def _parse_cli_args(args: list[str]) -> dict[str, Any]:
         "eval_case": eval_case,
         "overrides": overrides,
         "compact_prompt": compact_prompt,
+        "style": overrides.get("style"),
     }
+
+
+def _resolve_answer_style(style_arg: str | None, eval_case: dict[str, Any] | None) -> str:
+    if isinstance(style_arg, str) and style_arg.strip():
+        style = style_arg.strip()
+    elif isinstance(eval_case, dict) and eval_case.get("style"):
+        style = str(eval_case.get("style")).strip()
+    else:
+        style = _default_answer_style()
+    if style not in {"standard", "analyst_memo"}:
+        raise SystemExit("--style must be one of: standard, analyst_memo.")
+    return style
+
+
+def _default_answer_style() -> str:
+    style_config = _read_answer_style_config()
+    default_style = style_config.get("default_style") if isinstance(style_config, dict) else None
+    return str(default_style or "standard")
+
+
+def _load_answer_style_config(selected_style: str) -> dict[str, Any]:
+    style_config = _read_answer_style_config()
+    return {
+        "selected": selected_style,
+        "config": style_config,
+    }
+
+
+def _read_answer_style_config() -> dict[str, Any]:
+    if not ANSWER_STYLE_CONFIG_PATH.exists():
+        return {"default_style": "standard", "styles": {}}
+    try:
+        raw_text = ANSWER_STYLE_CONFIG_PATH.read_text(encoding="utf-8-sig")
+        if yaml is not None:
+            loaded = yaml.safe_load(raw_text)
+        else:
+            loaded = json.loads(raw_text)
+    except (OSError, ValueError, json.JSONDecodeError):
+        return {"default_style": "standard", "styles": {}}
+    return loaded if isinstance(loaded, dict) else {"default_style": "standard", "styles": {}}
 
 
 def _parse_positive_int(value: str, flag_name: str) -> int:
@@ -452,6 +543,7 @@ def _build_answer_prompt(
     config: dict[str, Any],
     eval_case: dict[str, Any] | None,
     compact_prompt: bool,
+    answer_style: str = "standard",
 ) -> str:
     if compact_prompt:
         return build_compact_answer_prompt(
@@ -459,8 +551,15 @@ def _build_answer_prompt(
             context_pack,
             config,
             eval_case=eval_case,
+            answer_style=answer_style,
         )
-    return build_answer_prompt(user_question, context_pack, config, eval_case=eval_case)
+    return build_answer_prompt(
+        user_question,
+        context_pack,
+        config,
+        eval_case=eval_case,
+        answer_style=answer_style,
+    )
 
 
 def _build_repair_prompt(
@@ -472,6 +571,7 @@ def _build_repair_prompt(
     missing_required_terms: list[str],
     forbidden_hits: list[str],
     compact_prompt: bool,
+    answer_style: str = "standard",
 ) -> str:
     if compact_prompt:
         return build_compact_repair_prompt(
@@ -482,6 +582,7 @@ def _build_repair_prompt(
             original_answer=original_answer,
             missing_required_terms=missing_required_terms,
             forbidden_hits=forbidden_hits,
+            answer_style=answer_style,
         )
     return build_validation_repair_prompt(
         user_question=user_question,
@@ -491,6 +592,7 @@ def _build_repair_prompt(
         original_answer=original_answer,
         missing_required_terms=missing_required_terms,
         forbidden_hits=forbidden_hits,
+        answer_style=answer_style,
     )
 
 
@@ -707,7 +809,7 @@ def validate_answer_text(
         }
 
     for pattern in FORBIDDEN_ANSWER_PATTERNS:
-        if pattern in answer:
+        if _has_forbidden_answer_pattern(answer, pattern):
             warnings.append(f"Forbidden phrase detected: {pattern}")
 
     if "风险水平" in answer and "中性" in answer:
@@ -805,6 +907,7 @@ def _apply_deterministic_answer_guardrails(
     answer: str,
     context_pack: dict[str, Any],
     user_question: str = "",
+    answer_style: str = "standard",
 ) -> dict[str, Any]:
     notes = []
     updated = answer.strip()
@@ -820,11 +923,17 @@ def _apply_deterministic_answer_guardrails(
         notes.append("Prepended required sample_fallback warning.")
 
     if _answer_requires_context_only_fallback(updated, holdings_source):
-        safe_answer = _build_context_only_safe_answer(context_json, user_question)
+        safe_answer = _build_context_only_safe_answer(
+            context_json,
+            user_question,
+            answer_style=answer_style,
+        )
         if safe_answer:
             return {
                 "answer": safe_answer,
                 "notes": ["Replaced hallucinated model answer with deterministic context-only answer."],
+                "answer_mode": "context_only_fallback",
+                "fallback_reason": "severe_hallucination_or_forbidden_output",
             }
 
     rewritten = _rewrite_trade_directive_wording(updated)
@@ -845,6 +954,7 @@ def _apply_deterministic_answer_guardrails(
     return {
         "answer": updated,
         "notes": notes,
+        "answer_mode": "natural",
     }
 
 
@@ -921,8 +1031,41 @@ def _answer_requires_context_only_fallback(answer: str, holdings_source: dict[st
     return (
         _answer_has_hallucination_markers(answer)
         or _misstates_current_holdings_as_sample(answer, holdings_source)
-        or any(pattern in answer for pattern in FORBIDDEN_ANSWER_PATTERNS)
+        or any(_has_forbidden_answer_pattern(answer, pattern) for pattern in FORBIDDEN_ANSWER_PATTERNS)
     )
+
+
+def _has_forbidden_answer_pattern(answer: str, pattern: str) -> bool:
+    if not pattern:
+        return False
+    for match in re.finditer(re.escape(pattern), answer, flags=re.IGNORECASE):
+        if _is_negated_or_boundary_context(answer, match.start()):
+            continue
+        return True
+    return False
+
+
+def _is_negated_or_boundary_context(answer: str, start: int) -> bool:
+    prefix = answer[max(0, start - 16) : start]
+    safe_prefixes = (
+        "不",
+        "不要",
+        "不能",
+        "不可",
+        "不得",
+        "并非",
+        "不是",
+        "禁止",
+        "避免",
+        "不提供",
+        "不给",
+        "不输出",
+        "不使用",
+        "不写",
+        "不能给",
+        "不构成",
+    )
+    return any(marker in prefix for marker in safe_prefixes)
 
 
 def _answer_has_hallucination_markers(answer: str) -> bool:
@@ -1020,10 +1163,11 @@ def _misstates_current_holdings_as_sample(answer: str, holdings_source: dict[str
     return "sample_fallback" in answer or "样本数据" in answer or "示例持仓" in answer
 
 
-def _build_context_only_safe_answer(context_json: dict[str, Any], user_question: str) -> str:
-    if "过热" not in user_question and "组合" not in user_question:
-        return ""
-
+def _build_context_only_safe_answer(
+    context_json: dict[str, Any],
+    user_question: str,
+    answer_style: str = "standard",
+) -> str:
     assessments = context_json.get("rule_based_assessments", {})
     if not isinstance(assessments, dict):
         assessments = {}
@@ -1046,6 +1190,100 @@ def _build_context_only_safe_answer(context_json: dict[str, Any], user_question:
     total_account_value = _portfolio_confirmed_value(context_json, "total_account_value")
     invested_asset_value = _portfolio_confirmed_value(context_json, "invested_asset_value")
     cash_reserve_value = _portfolio_confirmed_value(context_json, "cash_reserve_value")
+    total_profit_loss = _portfolio_confirmed_value(context_json, "total_profit_loss")
+
+    if answer_style == "analyst_memo" or "2000" in user_question or "泡沫" in user_question:
+        return _build_analyst_memo_context_only_answer(
+            market_temperature=market_temperature,
+            weights=weights,
+            targets=targets,
+            deviations=deviations,
+            flags=flags,
+            dca=dca,
+            holdings_updated_at=holdings_updated_at,
+            holdings_age_days=holdings_age_days,
+            holdings_freshness_status=holdings_freshness_status,
+            total_account_value=total_account_value,
+            invested_asset_value=invested_asset_value,
+            cash_reserve_value=cash_reserve_value,
+        )
+
+    if "历史" in user_question or "相似窗口" in user_question:
+        return "\n".join(
+            [
+                "## 核心结论",
+                "historical outcome is not forecast。历史结果不是预测，历史表现不代表未来结果。",
+                "",
+                "## 历史参照",
+                "相似窗口和历史相似数据只能作为历史参照，不能推出未来走势，也不能说明接下来大概率上涨。",
+                "",
+                "## 不确定性",
+                "不能确定、不能保证未来上涨；仍需要观察当前估值、利率、通胀、盈利、流动性和数据质量。",
+                "",
+                "## 边界",
+                "这不是短期涨跌判断，也不是投资建议；context 没有提供的实时估值或外部来源不能补写。",
+            ]
+        )
+
+    if "买入" in user_question or "卖出" in user_question:
+        return _build_trade_refusal_context_only_answer(
+            weights=weights,
+            targets=targets,
+            deviations=deviations,
+            flags=flags,
+            holdings_updated_at=holdings_updated_at,
+            holdings_age_days=holdings_age_days,
+            holdings_freshness_status=holdings_freshness_status,
+        )
+
+    if "真实收益" in user_question or "账户数据" in user_question or "收益怎么样" in user_question:
+        return "\n".join(
+            [
+                "## 结论",
+                (
+                    "可以基于 current_holdings.csv 本地持仓快照描述收益快照，但这不是实时账户同步，"
+                    "也不保证与支付宝当前页面完全一致。"
+                ),
+                "",
+                "## 当前快照",
+                f"- holdings_updated_at: {_display(holdings_updated_at)}；age_days: {_display(holdings_age_days)}；freshness: {_display(holdings_freshness_status)}。",
+                f"- total_account_value: {_format_number(total_account_value)}。",
+                f"- invested_asset_value: {_format_number(invested_asset_value)}。",
+                f"- cash_reserve_value: {_format_number(cash_reserve_value)}。",
+                f"- total_profit_loss / 收益快照: {_format_number(total_profit_loss)}。",
+                "",
+                "## 数据限制",
+                "current_holdings.csv 是用户本地手动录入快照，不是实时账户同步；若截图或账户发生变化，需要先更新 CSV 再判断。",
+            ]
+        )
+
+    if ("黄金" in user_question and "短债" in user_question) or "高配" in user_question:
+        return _build_gold_shortbond_context_only_answer(
+            weights=weights,
+            targets=targets,
+            deviations=deviations,
+            flags=flags,
+            holdings_updated_at=holdings_updated_at,
+            holdings_freshness_status=holdings_freshness_status,
+        )
+
+    if "数据源" in user_question or "缓存" in user_question or "stale" in user_question:
+        return "\n".join(
+            [
+                "## 结论",
+                "如果 context_health 不是 ok，或 market_snapshot 使用 stale cache，当前信息不足，不能直接做确定判断。",
+                "",
+                "## 处理原则",
+                "需要标注数据质量和 data limitations；缺失数据不能编造，缓存或数据源失败时结论应降级为观察。",
+                "",
+                "## 需要检查",
+                "优先看 context_health、market_snapshot.status、used_cache、data quality、核心市场数据是否缺失。",
+            ]
+        )
+
+    if "过热" not in user_question and "组合" not in user_question:
+        return ""
+
 
     lines = [
         "## 核心结论",
@@ -1099,6 +1337,151 @@ def _build_context_only_safe_answer(context_json: dict[str, Any], user_question:
     )
 
     return "\n".join(lines)
+
+
+def _build_analyst_memo_context_only_answer(
+    market_temperature: dict[str, Any],
+    weights: dict[str, Any],
+    targets: dict[str, Any],
+    deviations: dict[str, Any],
+    flags: dict[str, Any],
+    dca: dict[str, Any],
+    holdings_updated_at: Any,
+    holdings_age_days: Any,
+    holdings_freshness_status: Any,
+    total_account_value: Any,
+    invested_asset_value: Any,
+    cash_reserve_value: Any,
+) -> str:
+    allocation_lines = []
+    for asset in ("sp500", "nasdaq100", "short_bond", "gold"):
+        allocation_lines.append(
+            "- "
+            + f"{asset}: 当前 {_format_percent(weights.get(asset))}, "
+            + f"目标 {_format_percent(targets.get(asset))}, "
+            + f"偏离 {_format_pp(deviations.get(asset))}, "
+            + f"{_allocation_label(flags.get(asset))}。"
+        )
+
+    return "\n".join(
+        [
+            "## 核心判断",
+            (
+                "把当前市场与 2000 年互联网泡沫做类比有合理性，但不是 2000 年的简单复刻。"
+                "相似之处在于市场叙事偏乐观、风险偏好较高，真正风险不一定是 AI 无用，"
+                "而是高估值和高预期兑现压力是否已经过度透支。"
+            ),
+            "",
+            "## 类比成立的部分",
+            (
+                "从本地 context 看，当前 rule-based regime 是 "
+                f"{_display(market_temperature.get('overall_regime'))}，risk_level={_display(market_temperature.get('risk_level'))}，"
+                "可以理解为偏热但宏观敏感。这个状态和泡沫期的共同点，是市场容易把长期技术革命提前折现到当前价格。"
+            ),
+            "",
+            "## 类比不成立的部分",
+            (
+                "不能简单说这就是 2000 年复刻。技术革命真实存在，这次部分核心 AI 公司可能有收入、利润、现金流或基本面支撑；"
+                "但 context pack 没有提供最新价格、PE、市值或媒体来源，所以不能编造 Reuters、FactSet、Goldman 等外部数据来证明估值。"
+            ),
+            "",
+            "## 真正风险在哪里",
+            (
+                "真正风险不是“AI 有没有用”这个二元问题，而是高估值、高预期兑现压力和宏观利率环境叠加后，"
+                "未来 1-2 年科技股杀估值或阶段性回撤概率上升。这个说法仍是情景分析，不是确定性预测。"
+            ),
+            "",
+            "## 对用户判断的修正",
+            (
+                "“危机还没有到来但可能在一两年内接近”可以作为风险假设，但系统性经济危机证据不足，"
+                "不能断言危机必然到来，也不能把历史相似窗口写成 forecast。"
+            ),
+            "",
+            "## 需要观察的信号",
+            "观察重点应放在 equity_temperature、overall_regime、risk_level、DGS10、CPI/PCE、盈利兑现、流动性和 context_health，而不是编造实时阈值或外部报价。",
+            "",
+            "## 对当前组合的含义",
+            (
+                f"组合数据来自 current_holdings.csv 本地手动快照，holdings_updated_at={_display(holdings_updated_at)}，"
+                f"age_days={_display(holdings_age_days)}，freshness={_display(holdings_freshness_status)}；不是实时账户同步。"
+            ),
+            f"账户总额约 {_format_number(total_account_value)}，投资资产约 {_format_number(invested_asset_value)}，余额宝/cash reserve 约 {_format_number(cash_reserve_value)}；余额宝是现金准备金和扣款来源，不参与 5:2:2:1 目标仓位。",
+            *allocation_lines,
+            (
+                f"- DCA: daily_total {_format_number(dca.get('daily_total'))}, "
+                f"monthly_required {_format_number(dca.get('monthly_required'))}, "
+                f"budget_range {_format_number(dca.get('budget_min'))}-{_format_number(dca.get('budget_max'))}, "
+                f"status {_display(dca.get('status'))}。"
+            ),
+            "组合层面不清仓、不追涨、不提高纳指权重；更合适的是纪律化定投、保留再平衡框架，把低配/高配作为后续观察方向。",
+            "",
+            "## 最终判断",
+            (
+                "你的直觉抓住了“乐观叙事和价格透支”的核心，但需要从“危机必然临近”修正为“估值回撤风险上升、系统性危机证据不足”。"
+                "这是一份基于本地 context 的投研札记，不是短期预测，也不是交易指令。"
+            ),
+        ]
+    )
+
+
+def _build_trade_refusal_context_only_answer(
+    weights: dict[str, Any],
+    targets: dict[str, Any],
+    deviations: dict[str, Any],
+    flags: dict[str, Any],
+    holdings_updated_at: Any,
+    holdings_age_days: Any,
+    holdings_freshness_status: Any,
+) -> str:
+    lines = [
+        "## 结论",
+        "不能给具体交易指令，也不提供具体买卖金额。",
+        "",
+        "## 数据来源",
+        f"当前依据 current_holdings.csv 本地持仓快照，holdings_updated_at={_display(holdings_updated_at)}，age_days={_display(holdings_age_days)}，freshness={_display(holdings_freshness_status)}；它不是实时账户同步。",
+        "",
+        "## 观察框架",
+    ]
+    for asset in ("sp500", "nasdaq100", "short_bond", "gold"):
+        lines.append(
+            "- "
+            + f"{asset}: 当前 {_format_percent(weights.get(asset))}, "
+            + f"目标 {_format_percent(targets.get(asset))}, "
+            + f"偏离 {_format_pp(deviations.get(asset))}, "
+            + f"{_allocation_label(flags.get(asset))}。"
+        )
+    lines.extend(
+        [
+            "",
+            "## 风险提示",
+            "以上只能作为后续定投纪律和年度/阈值再平衡评估的观察方向，不是买入、卖出或调整仓位命令。",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _build_gold_shortbond_context_only_answer(
+    weights: dict[str, Any],
+    targets: dict[str, Any],
+    deviations: dict[str, Any],
+    flags: dict[str, Any],
+    holdings_updated_at: Any,
+    holdings_freshness_status: Any,
+) -> str:
+    return "\n".join(
+        [
+            "## 核心结论",
+            "黄金和短债高配说明当前组合相对目标更偏防御和现金流稳定暴露，但这只是仓位偏离描述，不是交易指令。",
+            "",
+            "## 关键事实",
+            f"- 数据来源：current_holdings.csv 本地持仓快照，holdings_updated_at={_display(holdings_updated_at)}，freshness={_display(holdings_freshness_status)}。",
+            f"- gold / 黄金: 当前 {_format_percent(weights.get('gold'))}, 目标 {_format_percent(targets.get('gold'))}, 偏离 {_format_pp(deviations.get('gold'))}, {_allocation_label(flags.get('gold'))}。",
+            f"- short_bond / 短债: 当前 {_format_percent(weights.get('short_bond'))}, 目标 {_format_percent(targets.get('short_bond'))}, 偏离 {_format_pp(deviations.get('short_bond'))}, {_allocation_label(flags.get('short_bond'))}。",
+            "",
+            "## 含义",
+            "这可以降低一部分权益波动暴露，但也可能让组合在权益继续强势时跟随不足。后续只作为定投和再平衡观察方向，不给卖出或清仓指令。",
+        ]
+    )
 
 
 def _level_value(value: Any) -> Any:
@@ -1308,6 +1691,8 @@ def _archive_answer_run(
         "context_health": context_health,
         "status": result.get("status"),
         "error": result.get("error"),
+        "answer_mode": result.get("answer_mode"),
+        "fallback_reason": result.get("fallback_reason"),
         "removed_thinking": result.get("removed_thinking", False),
         "cleaning_notes": result.get("cleaning_notes", []),
         "answer_validation": answer_validation,

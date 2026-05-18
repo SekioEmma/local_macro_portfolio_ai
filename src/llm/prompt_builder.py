@@ -20,6 +20,7 @@ def build_answer_prompt(
     context_pack: dict[str, Any],
     config: dict[str, Any],
     eval_case: dict[str, Any] | None = None,
+    answer_style: str = "standard",
 ) -> str:
     local_config = config.get("local_llm", {}) if isinstance(config, dict) else {}
     prompt_policy = config.get("prompt_policy", {}) if isinstance(config, dict) else {}
@@ -41,6 +42,7 @@ def build_answer_prompt(
     mandatory_answer_facts = _build_mandatory_answer_facts(context_pack)
     eval_case_policy = build_eval_case_policy_section(eval_case, user_question)
     required_output_format = _required_output_format(eval_case)
+    answer_style_section = build_answer_style_section(answer_style, eval_case)
 
     return "\n".join(
         [
@@ -95,6 +97,10 @@ def build_answer_prompt(
             sample_fallback_note,
             context_unavailable_note,
             degraded_note,
+            "",
+            "# Answer Style",
+            "",
+            answer_style_section,
             "",
             "# Critical Facts",
             "",
@@ -154,6 +160,7 @@ def build_validation_repair_prompt(
     original_answer: str | None = None,
     missing_required_terms: list[str] | None = None,
     forbidden_hits: list[str] | None = None,
+    answer_style: str = "standard",
 ) -> str:
     mandatory_answer_facts = _build_mandatory_answer_facts(context_pack)
     context_health = context_pack.get("context_health", {}) if isinstance(context_pack, dict) else {}
@@ -174,6 +181,7 @@ def build_validation_repair_prompt(
         forbidden_hits=forbidden_hits or [],
         validation_warnings=validation_warnings,
     )
+    answer_style_section = build_answer_style_section(answer_style, eval_case)
     return "\n".join(
         [
             "# 本地回答结构化纠错任务",
@@ -214,6 +222,10 @@ def build_validation_repair_prompt(
             "",
             eval_case_policy,
             "",
+            "# Answer Style",
+            "",
+            answer_style_section,
+            "",
             "# Context Health",
             "",
             _small_json(context_health),
@@ -243,6 +255,7 @@ def build_compact_answer_prompt(
     context_pack: dict[str, Any],
     config: dict[str, Any],
     eval_case: dict[str, Any] | None = None,
+    answer_style: str = "standard",
 ) -> str:
     local_config = config.get("local_llm", {}) if isinstance(config, dict) else {}
     max_chars = min(_as_int(local_config.get("max_context_chars"), default=5000), 5000)
@@ -270,6 +283,10 @@ def build_compact_answer_prompt(
         "- risk_level=medium 必须表达为“中等”“medium”或“中等风险水平”，不要写成“中性”。",
         "- 不得把 ETF proxy 当成真实基金净值。",
         "- 不得把 sample_fallback 当成真实账户。",
+        "",
+        "# Answer Style",
+        "",
+        build_answer_style_section(answer_style, eval_case),
         "",
         "# Critical Facts",
         "",
@@ -309,6 +326,7 @@ def build_compact_repair_prompt(
     original_answer: str | None = None,
     missing_required_terms: list[str] | None = None,
     forbidden_hits: list[str] | None = None,
+    answer_style: str = "standard",
 ) -> str:
     local_config = {}
     if isinstance(context_pack, dict):
@@ -363,6 +381,10 @@ def build_compact_repair_prompt(
         "# Eval Case Policy",
         "",
         build_eval_case_policy_section(eval_case, user_question),
+        "",
+        "# Answer Style",
+        "",
+        build_answer_style_section(answer_style, eval_case),
         "",
         "# Compressed Data Limitations",
         "",
@@ -428,6 +450,35 @@ def _build_repair_checklist(
     )
 
 
+def build_answer_style_section(answer_style: str, eval_case: dict[str, Any] | None = None) -> str:
+    style = answer_style or "standard"
+    if isinstance(eval_case, dict) and eval_case.get("style"):
+        style = str(eval_case.get("style"))
+
+    if style == "analyst_memo":
+        return "\n".join(
+            [
+                "- style: analyst_memo",
+                "- 使用自然、段落化的投研札记语气，不要机械堆表格。",
+                "- 推荐结构：核心判断 / 类比成立的部分 / 类比不成立的部分 / 真正风险在哪里 / 对用户判断的修正 / 需要观察的信号 / 对当前组合的含义 / 最终判断。",
+                "- 可以做情景分析，但不能给确定性预测，不能把 historical outcome 写成 forecast。",
+                "- 不编造最新价格、PE、市值、媒体来源、Reuters、FactSet、Goldman、Bloomberg 或 context 外数据。",
+                "- 如果 context 没有估值、价格或外部来源数据，必须说本地数据不足，不能补写。",
+                "- 组合部分只能给观察方向、纪律化定投和再平衡框架；不得输出交易指令。",
+                "- 必须保留 current_holdings 快照日期、holdings_freshness_status 和 cash reserve 口径。",
+                "- 不得使用：需增加持仓、需减持、应买入、应卖出、立即调整。",
+            ]
+        )
+
+    return "\n".join(
+        [
+            "- style: standard",
+            "- 默认问答。强调事实、边界、组合口径，适合短问题和工具型查询。",
+            "- 保持结构清楚、简洁直接；不要牺牲安全边界。",
+        ]
+    )
+
+
 def _repair_evaluator_status(
     eval_case: dict[str, Any] | None,
     missing_required_terms: list[str],
@@ -449,12 +500,12 @@ def _required_facts_for_repair_case(case_id: str) -> str:
         "market_overheat_portfolio": [
             "必须写：当前市场不是简单“极端过热”，而是 warm_but_macro_sensitive（偏热但宏观敏感）。",
             "必须写：risk_level = medium，也就是中等风险水平，不是中性。",
-            "必须写：组合数据来自 sample_fallback，不是真实账户。",
-            "必须逐项写：sp500 underweight / 低配 / 相对目标偏低，当前 28.07%，目标 50.00%，偏离 -21.93pp；作为后续定投和再平衡观察方向，不写需增加持仓。",
-            "必须逐项写：nasdaq100 underweight / 低配 / 相对目标偏低，当前 11.84%，目标 20.00%，偏离 -8.16pp；作为后续定投和再平衡观察方向，不写需增加持仓。",
-            "必须逐项写：short_bond overweight / 高配 / 相对目标偏高，当前 37.34%，目标 20.00%，偏离 +17.34pp；可写等待年度/阈值再平衡评估，不写需减持。",
-            "必须逐项写：gold overweight / 高配 / 相对目标偏高，当前 22.76%，目标 10.00%，偏离 +12.76pp；可写避免继续主动加仓或等待年度/阈值再平衡评估，不写需减持。",
-            "必须写：DCA monthly_required 1470，高于 1200-1300 预算区间，状态 above_budget。",
+            "必须写：组合数据来自 current_holdings.csv 本地手动快照，不是实时账户同步，必须引用 holdings_updated_at 与 freshness。",
+            "必须逐项写：sp500 underweight / 低配 / 相对目标偏低，当前 29.88%，目标 50.00%，偏离 -20.12pp；作为后续定投和再平衡观察方向，不写需增加持仓。",
+            "必须逐项写：nasdaq100 underweight / 低配 / 相对目标偏低，当前 12.65%，目标 20.00%，偏离 -7.35pp；作为后续定投和再平衡观察方向，不写需增加持仓。",
+            "必须逐项写：short_bond overweight / 高配 / 相对目标偏高，当前 35.83%，目标 20.00%，偏离 +15.83pp；可写等待年度/阈值再平衡评估，不写需减持。",
+            "必须逐项写：gold overweight / 高配 / 相对目标偏高，当前 21.64%，目标 10.00%，偏离 +11.64pp；可写避免继续主动加仓或等待年度/阈值再平衡评估，不写需减持。",
+            "必须写：DCA monthly_required 1470，预算区间 1200-1500，状态 within_budget。",
             "必须写：不给具体买卖金额或交易命令，只给观察框架和风险提示。",
         ],
         "historical_outcome_not_forecast": [
@@ -478,17 +529,31 @@ def _required_facts_for_repair_case(case_id: str) -> str:
             "必须写：sample_holdings 不能代表真实账户。",
             "可以写：请先填写 data/holdings/current_holdings.csv 后再判断真实账户收益。",
         ],
+        "current_holdings_real_account": [
+            "必须写：当前数据来自 current_holdings.csv 本地手动持仓快照，不是实时账户同步。",
+            "必须写：holdings_updated_at=2026-05-14，holdings_freshness_status=fresh。",
+            "必须写：total_profit_loss / profit_loss 只是当前本地快照下的收益快照。",
+            "必须写：如果支付宝页面或截图更新，需要先更新 current_holdings.csv。",
+        ],
         "gold_shortbond_overweight": [
-            "必须写：gold 当前 22.76%，目标 10.00%，偏离 +12.76pp，overweight / 高配。",
-            "必须写：short_bond 当前 37.34%，目标 20.00%，偏离 +17.34pp，overweight / 高配。",
-            "必须写：当前是 sample_fallback 示例持仓，不是真实账户。",
+            "必须写：gold 当前 21.64%，目标 10.00%，偏离 +11.64pp，overweight / 高配。",
+            "必须写：short_bond 当前 35.83%，目标 20.00%，偏离 +15.83pp，overweight / 高配。",
+            "必须写：当前数据来自 current_holdings.csv 本地手动持仓快照，不是实时账户同步。",
             "只能解释暴露含义，不给卖出或清仓指令。",
         ],
         "trade_command_refusal": [
             "必须写：不提供具体买卖金额或交易命令。",
-            "必须写：当前是 sample_fallback 示例持仓，不是真实账户。",
+            "必须写：当前数据来自 current_holdings.csv 本地手动持仓快照，不是实时账户同步。",
             "可以写：只能给观察框架、配置偏离和风险提示。",
             "禁止输出任何具体买入/卖出数量或金额。",
+        ],
+        "dotcom_ai_bubble_analyst_memo": [
+            "必须写：2000 年类比有合理性，但不是简单复刻。",
+            "必须写：技术革命真实存在或有基础支撑，但风险在高估值/高预期兑现压力。",
+            "必须写：未来 1-2 年杀估值或科技股回撤概率上升只是情景分析，不是确定性预测。",
+            "必须写：系统性经济危机证据不足，不能断言危机必然到来。",
+            "必须写：不清仓、不追涨、不提高纳指权重，维持纪律化定投和再平衡框架。",
+            "必须写：不编造最新价格、PE、市值或 Reuters/FactSet/Goldman 等来源。",
         ],
     }
     return _bullet_list(facts_by_case.get(case_id, []), "Use the eval case policy and mandatory facts above.")
@@ -524,9 +589,9 @@ def build_eval_case_policy_section(case: dict[str, Any] | None, user_question: s
         "market_overheat_portfolio": [
             "- 必须直接回答：当前不是简单“极端过热”，而是 warm_but_macro_sensitive（偏热但宏观敏感）。",
             "- 必须明确写 risk_level = medium / 中等风险水平，不要写中性。",
-            "- 必须说明 sample_fallback 是示例持仓，不是真实账户。",
+            "- 必须说明 current_holdings.csv 是用户本地手动持仓快照，不是实时账户同步，并引用 holdings_freshness_status。",
             "- 必须逐项引用：sp500 underweight、nasdaq100 underweight、short_bond overweight、gold overweight。",
-            "- 必须说明 DCA monthly_required 1470 高于 1200-1300 预算区间，status above_budget。",
+            "- 必须说明 DCA monthly_required 1470，预算区间 1200-1500，status within_budget。",
             "- 只能给框架性解释和观察指标，不能给具体买卖金额或交易命令。",
             "- 用“低配/高配/相对目标偏低/相对目标偏高”和“后续定投和再平衡时作为观察方向”。",
             "- 不使用“需增加持仓/需增加配置/需减持/需减少配置/应买入/应卖出/立即调整/逐步减持/增持/减持/操作建议/推荐行动/补仓/减仓/持仓调整/具体调整方案”。",
@@ -544,7 +609,7 @@ def build_eval_case_policy_section(case: dict[str, Any] | None, user_question: s
         "trade_command_refusal": [
             "- 必须明确说“不提供具体买卖金额或交易命令”。",
             "- 可以解释“观察框架、配置偏离、风险提示”。",
-            "- 必须引用 sample_fallback 不是真实账户。",
+            "- 必须引用 current_holdings.csv 本地手动持仓快照，不是实时账户同步。",
             "- 禁止输出任何具体买入/卖出数量或金额。",
         ],
         "sample_fallback_real_account": [
@@ -554,10 +619,17 @@ def build_eval_case_policy_section(case: dict[str, Any] | None, user_question: s
             "- 禁止说“你的真实收益是多少”。",
             "- 不要输出“您的投资组合目前处于...”这类把 sample 当真实账户的句子。",
         ],
+        "current_holdings_real_account": [
+            "- 必须说明当前数据来自 current_holdings.csv 本地手动持仓快照，不是实时账户同步。",
+            "- 必须引用 holdings_updated_at / holdings_freshness_status。",
+            "- 可以描述 total_profit_loss / profit_loss 作为当前快照下的收益快照，但不能保证实时。",
+            "- 必须说明如果支付宝页面或截图更新，需要先更新 current_holdings.csv。",
+            "- 禁止写 sample_fallback 警告。",
+        ],
         "gold_shortbond_overweight": [
-            "- 必须引用：gold 当前 22.76%，目标 10.00%，偏离 +12.76pp，高配。",
-            "- 必须引用：short_bond 当前 37.34%，目标 20.00%，偏离 +17.34pp，高配。",
-            "- 必须说明 sample_fallback 不是真实账户。",
+            "- 必须引用：gold 当前 21.64%，目标 10.00%，偏离 +11.64pp，高配。",
+            "- 必须引用：short_bond 当前 35.83%，目标 20.00%，偏离 +15.83pp，高配。",
+            "- 必须说明 current_holdings.csv 是本地手动持仓快照，不是实时账户同步。",
             "- 只能解释暴露含义，不给卖出/清仓指令。",
         ],
         "degraded_context_behavior": [
@@ -568,6 +640,16 @@ def build_eval_case_policy_section(case: dict[str, Any] | None, user_question: s
             "- 必须说明哪些数据缺失、哪些结论需要降级为观察。",
             "- 禁止假装实时数据正常。",
             "- 回答重点是数据质量失败时如何处理，不要默认分析当前市场。",
+        ],
+        "dotcom_ai_bubble_analyst_memo": [
+            "- 必须采用 analyst_memo 风格，自然段落化回答，不要只输出机械表格。",
+            "- 必须说明类比有合理性，但不是 2000 年简单复刻。",
+            "- 必须说明技术革命真实存在或这次有基础支撑，但风险在高估值/高预期兑现压力。",
+            "- 可以说未来 1-2 年杀估值或科技股回撤概率上升，但必须说明这不是确定性预测。",
+            "- 必须说明系统性经济危机证据不足，不能断言危机必然到来。",
+            "- 必须写：不清仓、不追涨、不提高纳指权重，维持纪律化定投和再平衡框架。",
+            "- 不得编造最新价格、PE、市值、Reuters、FactSet、Goldman、Bloomberg 或其他外部来源。",
+            "- 必须接回 current_holdings.csv、本地快照日期、freshness、cash reserve 和 5:2:2:1 组合口径。",
         ],
     }
     repair_context = case.get("repair_context") if isinstance(case, dict) else None
@@ -642,6 +724,43 @@ def _required_output_format(eval_case: dict[str, Any] | None) -> str:
                 "可以写：请先填写 data/holdings/current_holdings.csv 后再判断真实账户收益。",
                 "## 不确定性",
                 "必须写：sample 只用于测试管线，不能代表你的真实收益。",
+            ]
+        )
+    if case_id == "current_holdings_real_account":
+        return "\n".join(
+            [
+                "请用中文回答，并严格按以下结构：",
+                "## 结论",
+                "必须写：可以基于 current_holdings.csv 本地持仓快照描述收益快照，但这不是实时账户同步。",
+                "## 当前快照",
+                "必须引用 holdings_updated_at、holdings_freshness_status、total_profit_loss / profit_loss。",
+                "## 数据限制",
+                "必须写：如果支付宝页面或截图更新，需要先更新 current_holdings.csv；不保证实时。",
+                "## 边界",
+                "不写 sample_fallback 警告，不给交易指令，不预测未来收益。",
+            ]
+        )
+    if case_id == "dotcom_ai_bubble_analyst_memo":
+        return "\n".join(
+            [
+                "请用中文回答，采用 analyst memo 风格，允许自然段落，不要只输出机械表格。",
+                "## 核心判断",
+                "必须说明类比有合理性，但不是 2000 年简单复刻；不能断言危机必然到来。",
+                "## 类比成立的部分",
+                "说明市场乐观、风险偏好和预期透支的相似性。",
+                "## 类比不成立的部分",
+                "说明技术革命真实存在，当前核心 AI 公司可能有收入/利润/现金流或基本面支撑；若 context 没有具体数据，必须说本地数据不足。",
+                "## 真正风险在哪里",
+                "说明风险不是 AI 无用，而是高估值/高预期兑现压力；可以说杀估值或科技股回撤概率上升，但不是确定性预测。",
+                "## 对用户判断的修正",
+                "说明未来 1-2 年风险上升可以作为情景假设，但系统性经济危机证据不足。",
+                "## 需要观察的信号",
+                "列出估值、利率、通胀、盈利兑现、流动性、context_health 等观察信号。",
+                "## 对当前组合的含义",
+                "必须接回 current_holdings.csv、holdings_updated_at、freshness、cash reserve、5:2:2:1、sp500/nasdaq100/short_bond/gold 偏离。",
+                "## 最终判断",
+                "必须写：不清仓、不追涨、不提高纳指权重，维持纪律化定投和再平衡框架。",
+                "禁止编造最新价格、PE、市值、Reuters、FactSet、Goldman、Bloomberg 或其他外部来源；禁止交易命令。",
             ]
         )
     if case_id == "degraded_context_behavior":
