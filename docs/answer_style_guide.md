@@ -47,3 +47,33 @@ Suggested structure:
 Fallback is not a writing style. It is a safety layer.
 
 Use a context-only fallback only when the model answer shows severe hallucination, context leakage, wrong target ratios, invented dates, invented thresholds, English chatter, Thinking residue, or trade-command wording that cannot be safely repaired. Normal stylistic awkwardness should be handled with repair or accepted if the answer is otherwise safe.
+
+## Conversation-Distilled Analyst Memo Style Sample
+
+The `analyst_memo` style should feel like a research note for a personal long-term investor. It should not read like a mechanical checklist, a compliance template, or a table generated for its own sake.
+
+An analyst memo should:
+
+- state the core conclusion directly
+- acknowledge the reasonable part of the user's view
+- correct overstrong claims without dismissing the concern
+- separate similarities from differences
+- distinguish a real technology cycle from asset-price overextension
+- distinguish a large drawdown, valuation compression, and systemic crisis
+- connect the analysis back to the user's portfolio framework
+- avoid unnecessary tables when paragraphs are clearer
+- avoid invented current prices, PE ratios, market caps, or media sources
+- say that local context does not provide current data when those data are absent
+- use fallback only for severe hallucination, not normal stylistic imperfection
+
+### Example Skeleton: Current AI Market Versus The 2000 Dot-Com Bubble
+
+核心结论可以先给出：这个类比有合理性，但不能简单说成 2000 年的复刻。合理的部分在于，市场可能同时存在真实技术进步和资产价格提前透支；需要修正的部分在于，技术真实存在并不自动推出危机会在某个具体时间到来。
+
+相似点可以写在情绪和估值压力上：当一个技术主题被广泛相信、资金集中、叙事变得顺畅时，未来收益容易受高预期约束。即使技术方向长期成立，短中期也可能经历杀估值或科技股回撤。
+
+差异点要保持克制：如果本地 context 没有提供当前价格、PE、市值、盈利、现金流或媒体引用，就不要编造这些数据。可以说本地 context 未提供这些最新数据，因此这里只能做一般性框架判断。
+
+对用户判断的修正应当是：担心过热是合理的，但“危机一两年内必然到来”证据不足。更稳妥的表达是，科技股回撤和估值压缩的概率可能上升，但系统性经济危机需要更多证据。
+
+对组合的含义应回到纪律：不清仓、不追涨、不提高纳指权重，把纳指权重控制在既定 `5:2:2:1` 框架内，用 DCA、现金 reserve、freshness 和再平衡评估来处理不确定性。这里不是交易指令，也不提供具体买卖金额。

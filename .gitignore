@@ -19,6 +19,7 @@ outputs/reports/latest_llm_prompt.md
 outputs/reports/latest_llm_answer.md
 data/raw/
 data/processed/
+data/private/
 data/holdings/current_holdings.csv
 data/manual/market_data_manual.csv
 data/history/**/*.raw.json
