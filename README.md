@@ -1,28 +1,71 @@
 # Local Macro Portfolio AI
 
-Local Macro Portfolio AI 是一个本地个人投资研究与资产配置辅助系统，用于帮助个人在本地整理持仓、目标配置和定投规则，并计算账户状态、资产配置偏离与预算压力。
+Local Macro Portfolio AI 是一个本地个人投研与资产配置辅助系统。它读取本地持仓快照、目标配置、定投规则和公开宏观/市场数据，生成每日报告、LLM context pack，并通过本机 Ollama 模型提供 context-only 问答。
 
-本项目不是自动交易系统，不预测市场，不保证收益。它面向学习型长期投资实践，第一版只做基础数据读取与资产配置分析，为后续接入公开数据源、RAG 和本地模型做准备。
+它不是自动交易系统，不保证收益，不预测短期涨跌，也不提供具体交易指令。
 
-## 不做什么
+## 当前能力
 
-- 不预测市场
-- 不保证收益
-- 不自动交易
-- 不鼓励杠杆
-- 不鼓励频繁交易
+- 读取 `data/holdings/current_holdings.csv` 本地持仓快照
+- 将 余额宝 / cash reserve 作为扣款来源，并排除在目标仓位权重之外
+- 计算 `sp500:nasdaq100:short_bond:gold = 5:2:2:1` 目标配置偏离
+- 显示 holdings freshness、DCA budget、现金准备金和组合结构
+- 生成 `portfolio_snapshot`、`daily_report`、`llm_context_pack`
+- 使用本地 Ollama 默认模型 `qwen3:4b`
+- 支持 `standard` 与 `analyst_memo` 两种回答风格
+- 通过 `run_llm_eval.py` 做本地回答质量回归评估
 
-## 第一版 MVP
+## Quick Start
 
-- 读取持仓 CSV
-- 读取用户配置
-- 计算账户状态
-- 计算资产配置偏离
+Run from the project root:
 
-## 后续阶段
+```powershell
+python scripts/run_portfolio_check.py
+python scripts/run_daily_report.py
+python scripts/run_llm_context_pack.py
+python scripts/ask_local_ai.py "当前市场是否过热？对我的组合意味着什么？"
+```
 
-- 接入公开数据源
-- 建立 RAG 知识库
-- 接入本地模型
-- 探索微调流程
-- 适配 iPad 部署
+Full deterministic daily update:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/update_daily_report.ps1
+```
+
+Run local LLM eval:
+
+```powershell
+python scripts/run_llm_eval.py
+```
+
+## Main Docs
+
+- [Daily workflow](docs/daily_workflow.md)
+- [Troubleshooting](docs/troubleshooting.md)
+- [MVP release checklist](docs/mvp_release_checklist.md)
+- [Holdings update workflow](docs/holdings_update_workflow.md)
+- [Answer style guide](docs/answer_style_guide.md)
+- [Conversation distillation workflow](docs/conversation_distillation_workflow.md)
+- [Project status](docs/project_status.md)
+
+## Privacy
+
+The project is designed for local use. Do not commit:
+
+- `.env`
+- API keys
+- `data/holdings/current_holdings.csv`
+- `data/private/`
+- generated `outputs/`
+- raw conversation exports
+- private account snapshots
+
+## Non-Goals
+
+- no automatic trading
+- no cloud LLM API
+- no training or fine-tuning in the MVP workflow
+- no guaranteed returns
+- no short-term market forecast
+- no concrete buy/sell instructions
+- no use of old holding snapshots as real-time account sync

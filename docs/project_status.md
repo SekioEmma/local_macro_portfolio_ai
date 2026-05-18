@@ -615,8 +615,49 @@ fallback 分层：
 - 不做 iPad 部署
 - 不做复杂 UI
 
+### 阶段 6.4：Analyst Memo 自然回答质量优化
+
+已完成：
+- analyst_memo guardrail classification
+- answer_mode / fallback_reason / repair metadata
+- natural / repaired / context_only_fallback 分层
+- run_llm_eval.py 扩展为 9 个 case
+- 宏观 + 组合复盘题型覆盖
+
+当前状态：
+- run_llm_eval.py 通过
+- qwen3:4b 在复杂 analyst_memo 首答中仍可能编造 context 外数据
+- 严重幻觉时 context_only_fallback 仍是必要保护
+
+### 阶段 6.5：Conversation Distillation / 风格样本蒸馏基础
+
+已完成：
+- docs/conversation_distillation_workflow.md
+- docs/user_investment_policy.md
+- docs/answer_style_guide.md 增加 conversation-distilled analyst_memo 风格样本
+- .gitignore 增加 data/private/
+
+能力：
+- 明确 raw conversation 不能直接进入 prompt 或微调
+- 明确 stable_fact / user_policy / style_preference / eval_case / bad_answer_pattern 等蒸馏类型
+- 明确 data/private/ 只做本地私有样本和中间稿，不进入 Git
+
+### 阶段 6.6：MVP Daily Workflow And Release Checklist
+
+已完成：
+- docs/daily_workflow.md
+- docs/troubleshooting.md
+- docs/mvp_release_checklist.md
+- README.md 刷新为当前 MVP 入口
+- docs/project_status.md 更新本阶段状态
+
+能力：
+- 明确每日/每次开机推荐流程
+- 明确 PowerShell 日常运行命令
+- 明确 outputs、current_holdings.csv、data/private、.env 的隐私边界
+- 覆盖 Ollama、虚拟内存、Thinking 输出、中文乱码、sample_fallback、holdings freshness、context-only fallback 的故障处理
+- 明确 MVP v1 完成标准与发布前检查项
+
 ## 下一阶段计划
 
-阶段 6.4：Analyst Memo first-pass 质量与 fallback 依赖优化。
-
-阶段 6.3 已完成 analyst_memo 风格层与 fallback 分层。下一阶段优先提高 qwen3:4b 在复杂投研类问题中的自然回答质量，减少 context_only_fallback 触发，同时继续保持不接云端 API、不训练模型、不预测未来、不写具体投资建议、不提交真实 outputs 或 current_holdings.csv 的边界。
+MVP v1 进入冻结与日常使用观察期。下一阶段应优先处理真实日常运行中暴露的文档缺口、流程缺口或高频故障，不主动扩大 guardrail、不切换默认模型、不接云端 API、不训练或微调模型。
