@@ -665,6 +665,27 @@ fallback 分层：
 - GitHub 同步前必须确认 `.env`、`current_holdings.csv`、`data/private/` 和真实 `outputs/` 未被跟踪
 - 如果仓库保持 public，后续文档仍应避免写入真实账户金额、持仓快照原文或原始对话内容
 
+### 阶段 6.7：Distilled Analyst Memo Answer Optimization
+
+已完成：
+- docs/answer_style_guide.md 增加地缘、利率、通胀型冲击和组合含义的 analyst_memo 模式
+- docs/knowledge/macro_market_regime.md 增加普通避险与通胀型冲击的宏观 regime 知识框架
+- configs/eval_questions.yaml 增加 macro_geopolitics_rates_001 analyst_memo eval case
+- configs/answer_style.yaml 小幅补充 analyst_memo 风格约束
+
+能力：
+- 区分普通避险与通胀型冲击，不把所有地缘事件都写成普通 risk-off
+- 明确收益率上行与债券价格下跌的关系
+- 建立地缘 / 能源 / 通胀 / Fed 路径重定价 / 长端利率 / 高估值权益资产的分析链条
+- 区分外交降温与结构性风险解除
+- 区分估值压缩与系统性危机
+- 组合含义继续限制在相对目标、风险暴露、观察方向、DCA 纪律和再平衡评估内
+
+边界：
+- 未读取或提交 data/private 原文
+- 未写入真实账户金额、真实持仓快照、outputs 原文或时效行情
+- 未训练模型、未调用云 API、未修改默认模型
+
 ## 下一阶段计划
 
 MVP v1 进入冻结与日常使用观察期。下一阶段应优先处理真实日常运行中暴露的文档缺口、流程缺口或高频故障，不主动扩大 guardrail、不切换默认模型、不接云端 API、不训练或微调模型。

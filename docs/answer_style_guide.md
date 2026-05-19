@@ -77,3 +77,70 @@ An analyst memo should:
 对用户判断的修正应当是：担心过热是合理的，但“危机一两年内必然到来”证据不足。更稳妥的表达是，科技股回撤和估值压缩的概率可能上升，但系统性经济危机需要更多证据。
 
 对组合的含义应回到纪律：不清仓、不追涨、不提高纳指权重，把纳指权重控制在既定 `5:2:2:1` 框架内，用 DCA、现金 reserve、freshness 和再平衡评估来处理不确定性。这里不是交易指令，也不提供具体买卖金额。
+
+## Analyst Memo Pattern: Geopolitics, Rates, Inflation Shock, And Portfolio Implications
+
+Use this pattern when the user connects geopolitical tension, diplomatic talks, energy supply risk, Treasury yields, Fed policy repricing, long-duration equities, gold, bonds, and portfolio implications.
+
+### Applicable Scenarios
+
+- Geopolitical conflict, shipping disruption, oil supply risk, or energy-cost shock.
+- Diplomatic de-escalation that lowers tail risk but does not resolve structural trade, technology, supply-chain, security, or financial constraints.
+- Treasury yield rise, bond price pressure, equity valuation compression, or stock/bond/gold simultaneous weakness.
+- User asks whether these signals mean a systemic crisis is starting.
+
+### Terms To Correct
+
+- If the user says bonds are rising while the context is yield rise, correct the wording: yields are rising, bond prices are falling.
+- Distinguish ordinary risk-off from inflation shock.
+- Distinguish valuation compression from systemic crisis.
+- Distinguish diplomatic cooling from structural risk resolution.
+- Distinguish real technology progress from asset-price overextension.
+
+### Recommended Structure
+
+1. Core judgment: this is a macro-pricing pressure chain, not enough by itself to declare systemic crisis.
+2. Clarify the bond wording: yield up means bond price down.
+3. Ordinary risk-off versus inflation shock.
+4. Transmission chain: geopolitics/energy/shipping/insurance costs -> inflation expectations and Fed policy repricing -> long-end yield or real-rate pressure -> bond prices and high-valuation equities under pressure -> gold may also be pressured by real rates or dollar strength.
+5. Diplomatic de-escalation versus structural risk resolution.
+6. Valuation compression versus systemic crisis.
+7. Monitoring signals.
+8. Portfolio implications using only target-relative and review language.
+
+### Required Concepts
+
+- Ordinary risk-off: stocks can fall while long bonds and gold may be supported.
+- Inflation shock: oil, shipping, insurance, energy costs, inflation expectations, real rates, or term premium can rise together, so stocks, long bonds, and gold can all be pressured.
+- Treasury yields and bond prices move in opposite directions.
+- Long-duration growth equities are sensitive to higher discount rates.
+- Diplomatic de-escalation can reduce tail risk without removing structural constraints.
+- Systemic crisis needs broader evidence: credit spreads, bank or funding stress, earnings expectations, labor data, volatility, dollar funding stress, liquidity anomalies, and QDII subscription/redemption, FX, or NAV conversion abnormality.
+- For the user's portfolio, use exposure, relative-to-target, observation direction, DCA discipline, threshold review, and year-end review.
+
+### Forbidden Expressions
+
+- Do not say crisis is certain or already proven by stock/bond/gold weakness alone.
+- Do not predict short-term market direction.
+- Do not provide exact buy or sell amounts.
+- Do not say bonds are rising when the evidence is yield rise unless immediately clarifying the price/yield relationship.
+- Do not invent latest Treasury yields, ETF prices, PE ratios, market caps, FedWatch probabilities, Reuters links, broker forecasts, or institutional quotes.
+- Do not tell the user to immediately buy, sell, pause, resume, add, reduce, clear, or lever.
+- Do not treat cash reserve / 余额宝 as idle money waiting to be deployed.
+
+### Reusable Phrases
+
+- “更准确地说，这是收益率上行、债券价格承压，而不是债券价格上涨。”
+- “这更像通胀型冲击链条，而不是普通避险链条。”
+- “外交降温降低尾部风险，但不等于贸易、技术、供应链和金融约束已经结构性解除。”
+- “估值压缩和系统性危机不是同一件事；系统性危机需要看到信用、融资、盈利、就业和流动性压力共振。”
+- “对组合的含义只能落在风险暴露、相对目标偏高/偏低、观察方向和再平衡评估上，不是交易命令。”
+
+### Bad Answer Patterns
+
+- Treating every geopolitical event as ordinary risk-off and assuming long bonds or gold must rise.
+- Writing “bond market rises” when the text actually describes yield rise.
+- Turning diplomatic talks into a claim that structural risk has disappeared.
+- Turning higher yields and equity pressure into “systemic crisis is certain.”
+- Citing latest prices, exact yield levels, FedWatch odds, Reuters, Goldman, FactSet, or CME without local context.
+- Converting portfolio implications into buy/sell/add/reduce instructions.
