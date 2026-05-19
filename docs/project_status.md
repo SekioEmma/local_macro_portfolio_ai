@@ -502,13 +502,9 @@ qwen3:4b 结果：
 - DCA status = within_budget
 
 当前真实持仓口径：
-- total_account_value including cash ≈ 10886.45
-- invested_asset_value excluding cash ≈ 8757.55
-- cash_reserve_value ≈ 2128.90
-- sp500 ≈ 29.88%，目标 50%，低配约 -20.12pp
-- nasdaq100 ≈ 12.65%，目标 20%，低配约 -7.35pp
-- short_bond ≈ 35.83%，目标 20%，高配约 +15.83pp
-- gold ≈ 21.64%，目标 10%，高配约 +11.64pp
+- 真实账户金额、现金余额、收益和具体持仓比例属于本地私有快照信息，不写入可提交文档。
+- 可提交文档只保留资产类别方向、目标配置规则、cash reserve 口径和 DCA 规则。
+- 需要查看当前真实数值时，只读取本地 `data/holdings/current_holdings.csv` 和生成的 `outputs/reports/portfolio_snapshot.json`；这些文件不进入 Git。
 
 已明确限制：
 - 不提交 current_holdings.csv
@@ -657,6 +653,17 @@ fallback 分层：
 - 明确 outputs、current_holdings.csv、data/private、.env 的隐私边界
 - 覆盖 Ollama、虚拟内存、Thinking 输出、中文乱码、sample_fallback、holdings freshness、context-only fallback 的故障处理
 - 明确 MVP v1 完成标准与发布前检查项
+
+### GitHub Handoff 整理
+
+已完成：
+- 新增 docs/project_handoff.md 作为新 ChatGPT/Codex 窗口接手入口
+- README.md 增加 handoff 文档链接
+- docs/project_status.md 中的真实持仓数值摘要已脱敏，避免可提交文档暴露本地账户快照
+
+注意：
+- GitHub 同步前必须确认 `.env`、`current_holdings.csv`、`data/private/` 和真实 `outputs/` 未被跟踪
+- 如果仓库保持 public，后续文档仍应避免写入真实账户金额、持仓快照原文或原始对话内容
 
 ## 下一阶段计划
 

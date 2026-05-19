@@ -43,6 +43,7 @@ python scripts/run_llm_eval.py
 - [Daily workflow](docs/daily_workflow.md)
 - [Troubleshooting](docs/troubleshooting.md)
 - [MVP release checklist](docs/mvp_release_checklist.md)
+- [Project handoff](docs/project_handoff.md)
 - [Holdings update workflow](docs/holdings_update_workflow.md)
 - [Answer style guide](docs/answer_style_guide.md)
 - [Conversation distillation workflow](docs/conversation_distillation_workflow.md)
