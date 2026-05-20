@@ -545,6 +545,19 @@ def build_question_intent_policy_section(user_question: str, answer_style: str) 
         return "- intent: standard_concept_explanation; explain the concept only; do not cite portfolio, DCA, cash reserve, targets, market temperature, or current_holdings."
     if _is_recession_asset_role_question(question, answer_style):
         return "- intent: recession_asset_role; cover S&P 500 broad equity/profits/discount-rate risk, Nasdaq growth/long-duration sensitivity, short bonds as liquidity/low-duration buffer, and gold as tail-risk/real-rate/USD/safe-haven exposure; no trade orders."
+    if _is_market_top_pullback_question(question, answer_style):
+        return "\n".join(
+            [
+                "- intent: market_top_pullback_risk; start with: 回调风险上升可以成立，但确认见顶、趋势反转或系统性危机需要更强证据。",
+                "- Must separate three layers: 阶段性过热 / 回调风险, 中期趋势反转, 系统性危机。",
+                "- Must say AI 技术真实与估值透支可以同时存在。",
+                "- If local context does not provide latest PE, valuation, yields, oil, CPI/PPI, FedWatch, Reuters, FactSet, or other timestamped source data, say 本地 context 未提供; do not invent values or claim external lookup.",
+                "- Portfolio meaning is optional unless the user asks about their portfolio. If included, write only one boundary sentence using 相对目标配置, 相对风险暴露, 观察方向, 后续定投评估, 阈值复核, 年末复核, 再平衡评估; do not propose a holding stance.",
+                "- Systemic crisis evidence must explicitly include 信用、融资、银行、就业、盈利、波动率。",
+                "- Do not use: 行动建议, 建议维持, 防御性持仓, 潜在机会, 增配, 减配, 应暂停定投, 应卖出, 应买入, 清仓, 等跌再买, 立即调整, 买入 X 元, 卖出 X 元, 弹性调整, 再平衡操作, 再平衡策略, 实时反馈, 实际决策, 优先执行, 校准。",
+                "- Do not treat cash reserve / 余额宝 as deployable idle cash, and do not describe current_holdings.csv as real-time account sync.",
+            ]
+        )
     if _question_requests_latest_market_data(question):
         return "- intent: latest_market_data_boundary; if local context does not provide PE, valuation, ETF price, yield point, gold price, FedWatch, or external source, say it is not provided and use framework analysis only."
     return "- intent: general_answer"
@@ -563,6 +576,21 @@ def build_critical_facts_for_question(
                 "## Concept Question Boundary",
                 "- Critical market and portfolio facts are intentionally omitted for this standard concept explanation.",
                 "- Use the context only for boundaries; do not cite current holdings, DCA, cash reserve, market temperature, or target allocation unless the user asks for portfolio implications.",
+            ]
+        )
+    if _is_market_top_pullback_question(user_question, answer_style):
+        return "\n".join(
+            [
+                "## Market Top / Pullback Risk Boundary",
+                "- This question asks for a market-top and pullback-risk framework, not account-specific action advice.",
+                "- Do not quote current portfolio weights, account values, holding dates, DCA amounts, or cash reserve amounts unless the user explicitly asks for portfolio details.",
+                "- Do not quote SPY, QQQ, GLD, NVDA prices, PE, valuation multiples, CPI/PPI, oil, Treasury yields, credit spreads, FedWatch, Reuters, FactSet, Goldman, CME, or Trading Economics data unless the local context explicitly provides timestamped values.",
+                "- If the local context does not provide those latest values or sources, say 本地 context 未提供这些最新数据，只能做框架分析。",
+                "- Required framing: 回调风险上升可以成立，但确认见顶、趋势反转或系统性危机需要更强证据。",
+                "- Required layers: 阶段性过热 / 回调风险; 中期趋势反转; 系统性危机。",
+                "- Required AI framing: AI 技术趋势可以真实存在，但估值仍可能透支。",
+                "- Required crisis evidence: 系统性危机需要信用、融资、银行、就业、盈利、波动率等多信号确认。",
+                "- Portfolio meaning is optional unless the user asks about their portfolio. If included, write only one boundary sentence using relative target allocation, relative risk exposure, observation direction, later DCA review, threshold review, year-end review, and rebalancing assessment; do not propose a holding stance or opportunity.",
             ]
         )
     return build_critical_facts_section(context_pack)
@@ -609,6 +637,20 @@ def _is_recession_asset_role_question(question: str, answer_style: str) -> bool:
     recession_terms = ("衰退", "经济下行", "软着陆", "recession", "hard landing")
     asset_terms = ("标普", "纳指", "短债", "黄金", "sp500", "nasdaq", "gold")
     return any(term in lower for term in recession_terms) and any(term in lower for term in asset_terms)
+
+
+def _is_market_top_pullback_question(question: str, answer_style: str) -> bool:
+    if (answer_style or "standard") != "analyst_memo":
+        return False
+    lower = (question or "").lower()
+    top_terms = ("见顶", "見頂", "顶部", "top", "market top")
+    pullback_terms = ("回调", "回撤", "pullback", "correction")
+    risk_terms = ("美股", "标普", "纳指", "nasdaq", "sp500", "s&p", "ai", "估值")
+    return (
+        any(term in lower for term in top_terms)
+        and any(term in lower for term in pullback_terms)
+        and any(term in lower for term in risk_terms)
+    )
 
 
 def _question_requests_latest_market_data(question: str) -> bool:
@@ -671,6 +713,17 @@ def _required_facts_for_repair_case(case_id: str) -> str:
             "必须写：观察信用利差、银行或融资压力、企业盈利、就业数据、波动率、美元融资压力、流动性和 QDII 申赎/汇兑/净值折算异常。",
             "必须写：本地 context 未提供最新 ETF 价格、PE、市值、具体收益率点位、FedWatch 概率或外部来源，不能编造。",
             "必须写：组合含义只能落在相对目标偏高/偏低、风险暴露、观察方向、DCA 纪律、阈值复核和年末复核；不得输出交易命令。",
+        ],
+        "us_equity_top_pullback_risk_001": [
+            "- Must start with this judgment: 回调风险上升可以成立，但确认见顶、趋势反转或系统性危机需要更强证据。",
+            "- Must separate three layers: 阶段性过热 / 回调风险; 中期趋势反转; 系统性危机。",
+            "- Must explain that AI 技术真实与估值透支可以同时存在。",
+            "- Must say 本地 context 未提供最新 PE、估值倍数、收益率、油价、CPI/PPI、FedWatch、Reuters/FactSet 等可核验数据 if those fields are not explicitly timestamped in the local context.",
+            "- Do not quote current prices, PE, CPI/PPI, oil, Treasury yields, credit spreads, FedWatch probabilities, or media/vendor claims unless the local context explicitly provides timestamped data.",
+            "- Systemic crisis requires multiple signals such as 信用、融资、银行、就业、盈利、波动率; do not infer it from a single valuation or pullback signal.",
+            "- Portfolio meaning is optional unless the user asks about their portfolio; if included, use only one boundary sentence with 相对目标配置、相对风险暴露、观察方向、后续定投评估、阈值复核、年末复核、再平衡评估。",
+            "- Do not use trade, stance, opportunity, or operation wording: 行动建议、建议维持、防御性持仓、潜在机会、增配、减配、应暂停定投、应卖出、应买入、清仓、等跌再买、立即调整、买入 X 元、卖出 X 元、弹性调整、再平衡操作、再平衡策略、实时反馈、实际决策、优先执行、校准。",
+            "- Do not treat cash reserve / 余额宝 as deployable idle cash, and do not describe current_holdings.csv as real-time account sync.",
         ],
         "historical_outcome_not_forecast": [
             "必须写：historical outcome is not forecast。",
@@ -790,6 +843,15 @@ def build_eval_case_policy_section(case: dict[str, Any] | None, user_question: s
             "- 必须接回 current_holdings.csv、本地快照、freshness、cash reserve 和 5:2:2:1 组合框架。",
             "- 组合含义只能写相对目标偏高/偏低、风险暴露、观察方向、DCA 纪律、阈值复核和年末复核，不得给交易命令。",
         ],
+        "us_equity_top_pullback_risk_001": [
+            "- 必须开头说明：回调风险上升可以成立，但确认见顶、趋势反转或系统性危机需要更强证据。",
+            "- 必须分清三层：阶段性过热 / 回调风险；中期趋势反转；系统性危机。",
+            "- 必须说明 AI 技术真实与估值透支可以同时存在。",
+            "- 如果本地 context 没有带时间戳的最新 PE、估值倍数、收益率、油价、CPI/PPI、FedWatch、Reuters/FactSet 等数据，必须说明本地 context 未提供，不能编造或声称已经查询。",
+            "- 必须说明系统性危机需要信用、融资、银行、就业、盈利、波动率等多信号确认。",
+            "- 组合含义可省略；如写，只能用一句边界说明相对目标配置、相对风险暴露、观察方向、后续定投评估、阈值复核、年末复核和再平衡评估，不得写持仓立场、机会、执行、策略或交易命令。",
+            "- 禁止使用：行动建议、建议维持、防御性持仓、潜在机会、增配、减配、暂停定投、应买入、应卖出、清仓、等跌再买、立即调整、再平衡操作、再平衡策略、实时反馈、实际决策、优先执行、校准。",
+        ],
         "historical_outcome_not_forecast": [
             "- 必须逐字出现“historical outcome is not forecast”或“历史结果不是预测”。",
             "- 必须说明“历史表现不代表未来结果”。",
@@ -876,6 +938,29 @@ def _required_output_format(
         return "请用中文简洁解释概念和机制；如涉及黄金，可补充机会成本、美元、避险需求和通胀预期；不要输出组合比例、target allocation、cash reserve、DCA、market temperature、portfolio snapshot 或交易建议。"
     if case_id is None and _is_recession_asset_role_question(user_question, answer_style):
         return "请用中文按 analyst memo 风格回答：先说明这是衰退情境分析而非短期预测，再分别解释标普500、纳指100、短债、黄金的角色，最后只用相对目标、风险暴露、观察方向、阈值复核和年末复核语言说明组合含义；不要写建议行动、减配、保持高配、具体买卖金额或交易命令。"
+    if case_id == "us_equity_top_pullback_risk_001" or (
+        case_id is None and _is_market_top_pullback_question(user_question, answer_style)
+    ):
+        return "\n".join(
+            [
+                "请用中文按 analyst memo 风格回答，允许自然段落，但必须覆盖以下边界：",
+                "## 核心判断",
+                "第一句必须表达：回调风险上升可以成立，但确认见顶、趋势反转或系统性危机需要更强证据。",
+                "## 三层判断",
+                "分别说明：阶段性过热 / 回调风险；中期趋势反转；系统性危机。",
+                "## 数据边界",
+                "如果本地 context 未提供最新 PE、估值倍数、收益率、油价、CPI/PPI、FedWatch、Reuters/FactSet 等带时间戳的可核验数据，必须明确说本地 context 未提供这些最新数据，不能声称已经查询，不能补具体数值或来源。",
+                "## AI 与估值",
+                "必须说明 AI 技术真实与估值透支可以同时存在；风险来自估值、利率/真实利率、通胀、油价、集中度、盈利兑现和流动性等框架变量。",
+                "## 系统性危机证据",
+                "必须逐字包含：系统性危机需要信用、融资、银行、就业、盈利、波动率等多信号确认，不能由单一估值或回调信号推出。",
+                "## 对组合的含义",
+                "如果用户没有明确询问自己的组合，只能写一句边界说明：若映射到组合层面，只能用于相对目标配置、相对风险暴露、观察方向、后续定投评估、阈值复核、年末复核和再平衡评估，不构成交易指令。不输出当前账户金额、持仓日期、组合比例、DCA 金额或 cash reserve 金额；不要写持仓立场、机会、组合操作、策略、执行、决策、校准、调整动作或实时反馈。",
+                "## 禁止表达",
+                "不得出现：行动建议、建议维持、防御性持仓、潜在机会、增配、减配、应暂停定投、暂停定投、应卖出、应买入、清仓、等跌再买、立即调整、买入 X 元、卖出 X 元、具体买卖金额、弹性调整、再平衡操作、再平衡策略、实时反馈、实际决策、优先执行、校准。",
+                "不得把 cash reserve / 余额宝当成待配置资产，不得把 current_holdings.csv 说成实时账户同步。",
+            ]
+        )
     if case_id == "market_overheat_portfolio":
         return "\n".join(
             [
@@ -1106,6 +1191,20 @@ def _build_mandatory_answer_facts(
                 "- This is a standard concept explanation.",
                 "- Do not cite portfolio weights, DCA, cash reserve, target allocation, market temperature, or current_holdings unless the user explicitly asks for portfolio implications.",
                 "- Answer the concept directly and keep it concise.",
+            ]
+        )
+
+    if _is_market_top_pullback_question(user_question, answer_style):
+        return "\n".join(
+            [
+                "- This is a market top / pullback-risk analyst memo, not an account-action or portfolio-detail request.",
+                "- Mandatory opening: 回调风险上升可以成立，但确认见顶、趋势反转或系统性危机需要更强证据。",
+                "- Must include three layers: 阶段性过热 / 回调风险; 中期趋势反转; 系统性危机。",
+                "- Must include: AI 技术真实与估值透支可以同时存在。",
+                "- Must include: 本地 context 未提供最新 PE、估值倍数、收益率、油价、CPI/PPI、FedWatch、Reuters/FactSet 等可核验数据 when not explicitly timestamped in local context.",
+                "- Must include exactly: 系统性危机需要信用、融资、银行、就业、盈利、波动率等多信号确认。",
+                "- Do not cite portfolio weights, account values, holding dates, DCA amounts, cash reserve amounts, or current_holdings snapshot details unless the user explicitly asks for portfolio details.",
+                "- Do not use trade, stance, opportunity, strategy, decision, execution, calibration, adjustment, or operation wording; if portfolio implications are included, use only one boundary sentence with 相对目标配置、相对风险暴露、观察方向、后续定投评估、阈值复核、年末复核、再平衡评估.",
             ]
         )
 

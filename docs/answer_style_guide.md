@@ -144,3 +144,83 @@ Use this pattern when the user connects geopolitical tension, diplomatic talks, 
 - Turning higher yields and equity pressure into “systemic crisis is certain.”
 - Citing latest prices, exact yield levels, FedWatch odds, Reuters, Goldman, FactSet, or CME without local context.
 - Converting portfolio implications into buy/sell/add/reduce instructions.
+
+## Analyst Memo Pattern: Market Top, Pullback Risk, And Long-Term Allocation
+
+Use this pattern when the user asks whether US equities have topped, whether a pullback is becoming more likely, whether AI or technology equities are overheated, or whether high valuation plus rate and inflation pressure should change long-term DCA discipline.
+
+### Required Framing
+
+The memo must separate three layers:
+
+1. Stage-level overheating or pullback risk.
+2. Medium-term trend reversal.
+3. Systemic crisis.
+
+It is acceptable to say pullback risk has risen when the reasoning is framed as probabilistic. It is not acceptable to say the market has confirmed a top, that a crash is imminent, or that a crisis has already started unless the local context contains broad, timestamped confirmation across stress indicators.
+
+### Reasonable Concerns To Acknowledge
+
+- elevated valuation
+- crowded technology or AI leadership
+- rising long-end yields or real yields
+- repeated inflation pressure
+- oil or energy-cost disruption
+- worsening market breadth
+- high market concentration
+- earnings expectations that may be hard to satisfy
+- liquidity conditions becoming less forgiving
+
+### Corrections To Overstrong Claims
+
+- "Pullback risk rising" is not the same as "confirmed top."
+- Stage-level top signals are not the same as a medium-term trend reversal.
+- Valuation compression is not the same as systemic crisis.
+- AI industry progress can be real while asset prices still discount too much growth too early.
+- Higher rates, inflation pressure, oil shocks, and narrow leadership reduce the margin of safety, but they do not by themselves prove an imminent crash.
+
+### Technology Fundamentals Versus Valuation Risk
+
+Do not frame the issue as "AI is fake" versus "AI guarantees returns." The better frame is whether fundamentals, valuation, liquidity, and rates are aligned:
+
+- Are revenue and earnings actually being realized?
+- Has valuation already priced in aggressive growth?
+- Are capital expenditures pressuring free cash flow?
+- Has market concentration increased portfolio-level risk?
+- Are higher discount rates making long-duration equities less forgiving?
+
+### Portfolio Translation
+
+For the user's portfolio, translate the conclusion only into:
+
+- target allocation
+- relative risk exposure
+- underweight / overweight language
+- future DCA review
+- threshold review
+- year-end rebalancing review
+- liquidity and product-channel risk checks
+
+Do not convert the memo into immediate buy, sell, pause DCA, clear position, wait for a dip, or specific amount instructions.
+
+### Reusable Expressions
+
+- "说'回调风险上升'有依据，但说'已确认见顶'还过度。"
+- "AI产业趋势可以真实存在，但估值仍可能透支。"
+- "高估值市场的核心风险不是故事消失，而是利率、通胀和盈利兑现降低容错率。"
+- "阶段性顶部信号成立，不等于中期趋势反转已经确认。"
+- "系统性危机需要信用、流动性、就业和盈利等多维证据。"
+- "对组合的含义应落实到相对风险暴露和后续再平衡评估，而不是即时交易命令。"
+
+### Forbidden Expressions
+
+- "美股已经确定见顶。"
+- "接下来一定大跌。"
+- "危机已经启动。"
+- "必须清仓等回调。"
+- "应暂停定投。"
+- "应卖出一部分。"
+- "按今天行情应调整为某金额。"
+- "截至最新行情。"
+
+Only use time-sensitive wording when the local context provides explicit timestamped data and the answer cites that boundary. Otherwise say the local context does not provide the latest market data.

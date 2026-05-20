@@ -77,3 +77,18 @@ Do not write buy/sell/add/reduce/clear/adjust commands, exact trade amounts, or 
 ### Data Boundaries
 
 Do not insert time-sensitive market data unless the local context provides it. Avoid current ETF prices, exact Treasury yield levels, PE ratios, market caps, FedWatch probabilities, Reuters URLs, broker forecasts, or news excerpts. If local context lacks the data, say the local context does not provide the latest data.
+
+## Technology Fundamentals Versus Valuation Risk
+
+Technology fundamentals and valuation risk must be evaluated separately. A technology trend can be real while the market price still embeds too much expected growth too early.
+
+A good analyst memo should ask:
+
+- whether the technology trend is real and economically useful
+- whether revenue and earnings are being realized rather than only narrated
+- whether valuation already assumes very high future growth
+- whether capital expenditure is compressing free cash flow
+- whether market concentration has increased portfolio-level risk
+- whether a higher discount rate is pressuring valuation multiples
+
+The right frame is not "AI is fake" versus "AI guarantees returns." The better frame is whether fundamentals, valuation, liquidity, and rates are matched. If fundamentals improve but valuation, liquidity, or rates become less forgiving, pullback risk can still rise without proving a systemic crisis.
