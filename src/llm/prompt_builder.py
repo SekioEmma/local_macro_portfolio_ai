@@ -33,16 +33,28 @@ def build_answer_prompt(
     )
     context_health = context_pack.get("context_health", {}) if isinstance(context_pack, dict) else {}
     context_status = context_pack.get("status") if isinstance(context_pack, dict) else "error"
+    concept_only = _standard_concept_without_portfolio(user_question, answer_style)
 
     context_excerpt = _prepare_context_excerpt(context_md, max_context_chars)
+    if concept_only:
+        context_excerpt = (
+            "Concept-only standard question. Local portfolio and market-regime context is intentionally "
+            "omitted because the user did not ask for portfolio implications."
+        )
+        compressed_limitations = []
     sample_fallback_note = _sample_fallback_note(context_json)
     context_unavailable_note = _context_unavailable_note(context_status, context_md, context_json)
     degraded_note = _degraded_context_note(context_health)
-    critical_facts = build_critical_facts_section(context_pack)
-    mandatory_answer_facts = _build_mandatory_answer_facts(context_pack)
+    critical_facts = build_critical_facts_for_question(context_pack, user_question, answer_style)
+    mandatory_answer_facts = _build_mandatory_answer_facts(
+        context_pack,
+        user_question=user_question,
+        answer_style=answer_style,
+    )
     eval_case_policy = build_eval_case_policy_section(eval_case, user_question)
-    required_output_format = _required_output_format(eval_case)
+    required_output_format = _required_output_format(eval_case, user_question, answer_style)
     answer_style_section = build_answer_style_section(answer_style, eval_case)
+    question_intent_policy = build_question_intent_policy_section(user_question, answer_style)
 
     return "\n".join(
         [
@@ -73,11 +85,14 @@ def build_answer_prompt(
             "- 不得声称保证收益。",
             "- 不得输出具体买入、卖出、仓位调整或交易指令。",
             "- 不得把仓位偏离写成操作建议、推荐行动、补仓、减仓、逐步减持、增持、减持、转为某配置、持仓调整或具体调整方案。",
+            "- 不得编造最新 ETF 价格、PE、市值、具体收益率点位、黄金价格、FedWatch 概率，或 Reuters/FactSet/Goldman/CME 等来源。",
             "",
             "# Runtime Policy",
             "",
             f"- 回答语言：{prompt_policy.get('language', 'zh-CN')}",
             "- 如果 context pack 没有数据，直接说当前信息不足。",
+            "- 如果用户问“最新”“当前”“PE”“估值”“收益率”“价格”“FedWatch”等实时或点位数据，必须先核对本地 context 是否明确提供这些字段；未提供就明确说本地 context 未提供，只能做框架分析。",
+            "- 不要把用户问题中的数字、事件或来源当作系统已核验事实；除非 context pack 明确提供，否则只能写“用户提到”。",
             "- 如果账户还是 sample_fallback，必须说明当前不是真实账户。",
             "- 如果 holdings_source.mode=sample_fallback，必须在核心结论中明确写出：当前账户数据是示例持仓，不是真实账户。",
             "- 如果 holdings_source.mode=current_holdings，必须说明组合数据来自用户本地 current_holdings.csv 快照，手动录入且不保证实时。",
@@ -97,6 +112,10 @@ def build_answer_prompt(
             sample_fallback_note,
             context_unavailable_note,
             degraded_note,
+            "",
+            "# Question Intent Policy",
+            "",
+            question_intent_policy,
             "",
             "# Answer Style",
             "",
@@ -162,13 +181,20 @@ def build_validation_repair_prompt(
     forbidden_hits: list[str] | None = None,
     answer_style: str = "standard",
 ) -> str:
-    mandatory_answer_facts = _build_mandatory_answer_facts(context_pack)
+    mandatory_answer_facts = _build_mandatory_answer_facts(
+        context_pack,
+        user_question=user_question,
+        answer_style=answer_style,
+    )
     context_health = context_pack.get("context_health", {}) if isinstance(context_pack, dict) else {}
     compressed_limitations = (
         context_pack.get("compressed_data_limitations", []) if isinstance(context_pack, dict) else []
     )
+    if _standard_concept_without_portfolio(user_question, answer_style):
+        compressed_limitations = []
     eval_case_policy = build_eval_case_policy_section(eval_case, user_question)
-    critical_facts = build_critical_facts_section(context_pack)
+    critical_facts = build_critical_facts_for_question(context_pack, user_question, answer_style)
+    question_intent_policy = build_question_intent_policy_section(user_question, answer_style)
     repair_checklist = _build_repair_checklist(
         eval_case=eval_case,
         validation_warnings=validation_warnings,
@@ -194,6 +220,7 @@ def build_validation_repair_prompt(
             "不要给具体买卖金额或交易命令，不要预测短期涨跌，不要保证收益。",
             "不得说缺少组合配置，因为组合配置已经在 Mandatory Facts 中提供。",
             "不得添加 context pack 外部市场数据、来源、实时数据、机构名称或账户信息。",
+            "如果用户问最新/当前/PE/估值/收益率/价格/FedWatch，未在 context 明确提供时必须写本地 context 未提供，不能补具体数值。",
             "只输出修复后的最终答案。",
             "",
             "# Original User Question",
@@ -224,6 +251,10 @@ def build_validation_repair_prompt(
             "",
             eval_case_policy,
             "",
+            "# Question Intent Policy",
+            "",
+            question_intent_policy,
+            "",
             "# Answer Style",
             "",
             answer_style_section,
@@ -246,7 +277,7 @@ def build_validation_repair_prompt(
             "",
             "# Required Final Answer",
             "",
-            _required_output_format(eval_case),
+            _required_output_format(eval_case, user_question, answer_style),
             "",
             "修复时优先保留自然段落化表达；不要新增 context pack 之外的数据、来源或实时行情。",
             "",
@@ -267,6 +298,8 @@ def build_compact_answer_prompt(
     compressed_limitations = (
         context_pack.get("compressed_data_limitations", []) if isinstance(context_pack, dict) else []
     )
+    if _standard_concept_without_portfolio(user_question, answer_style):
+        compressed_limitations = []
     parts = [
         "# Compact Local Evaluation Prompt",
         "",
@@ -276,6 +309,8 @@ def build_compact_answer_prompt(
         "# Forbidden Behaviors",
         "",
         "- 不得编造 context pack 外部市场数据、账户数据或来源。",
+        "- 不得编造最新 ETF 价格、PE、市值、具体收益率点位、黄金价格、FedWatch 概率，或 Reuters/FactSet/Goldman/CME 等来源。",
+        "- 用户问最新/当前/PE/估值/收益率/价格/FedWatch 时，未在本地 context 明确提供就说未提供，只能做框架分析。",
         "- 不得编造外部来源、实时更新时间、模型版本、规则库、Bloomberg/ISO、交易量、资金流入、波动率系数、风险评分或自动调仓。",
         "- 不要写“数据来源”列表、合规声明、ISO 标准、规则校准时间、模型更新时间或自动生成声明；唯一来源只能是本地 context pack / current_holdings 快照。",
         "- 不得把 historical outcome 写成 forecast；historical outcome is not forecast。",
@@ -293,9 +328,13 @@ def build_compact_answer_prompt(
         "",
         build_answer_style_section(answer_style, eval_case),
         "",
+        "# Question Intent Policy",
+        "",
+        build_question_intent_policy_section(user_question, answer_style),
+        "",
         "# Critical Facts",
         "",
-        build_critical_facts_section(context_pack),
+        build_critical_facts_for_question(context_pack, user_question, answer_style),
         "",
         "# Eval Case Policy",
         "",
@@ -315,7 +354,7 @@ def build_compact_answer_prompt(
         "",
         "# Required Output Format",
         "",
-        _required_output_format(eval_case),
+        _required_output_format(eval_case, user_question, answer_style),
         "",
         "再次确认：只输出最终答案，不要输出推理过程；不要编造数据；不要给交易命令。",
         "",
@@ -340,6 +379,8 @@ def build_compact_repair_prompt(
     compressed_limitations = (
         context_pack.get("compressed_data_limitations", []) if isinstance(context_pack, dict) else []
     )
+    if _standard_concept_without_portfolio(user_question, answer_style):
+        compressed_limitations = []
     repair_checklist = _build_repair_checklist(
         eval_case=eval_case,
         validation_warnings=validation_warnings,
@@ -364,6 +405,7 @@ def build_compact_repair_prompt(
         "不要写“配置不足/配置过剩”，请改写为“低配/高配”或“相对目标偏低/相对目标偏高”。",
         "risk_level=medium 必须写成中等或 medium，不要写中性。",
         "不得添加 context pack 外部市场数据、来源、实时数据、机构名称或账户信息。",
+        "如果用户问最新/当前/PE/估值/收益率/价格/FedWatch，未在 context 明确提供时必须说本地 context 未提供，不能补具体数值。",
         "不得添加外部来源、实时更新时间、模型版本、规则库、Bloomberg/ISO、交易量、资金流入、波动率系数、风险评分或自动调仓。",
         "如果 missing_required_terms 非空，必须逐条补足对应概念，并至少复制每组中的一个短语。",
         "",
@@ -381,11 +423,15 @@ def build_compact_repair_prompt(
         "",
         "# Critical Facts",
         "",
-        build_critical_facts_section(context_pack),
+        build_critical_facts_for_question(context_pack, user_question, answer_style),
         "",
         "# Eval Case Policy",
         "",
         build_eval_case_policy_section(eval_case, user_question),
+        "",
+        "# Question Intent Policy",
+        "",
+        build_question_intent_policy_section(user_question, answer_style),
         "",
         "# Answer Style",
         "",
@@ -397,7 +443,7 @@ def build_compact_repair_prompt(
         "",
         "# Required Final Answer",
         "",
-        _required_output_format(eval_case),
+        _required_output_format(eval_case, user_question, answer_style),
         "",
         "只输出修复后的最终答案。不要解释你如何修复。保留原回答中正确的分析段落，不要重写成机械模板。",
         "",
@@ -487,8 +533,88 @@ def build_answer_style_section(answer_style: str, eval_case: dict[str, Any] | No
             "- style: standard",
             "- 默认问答。强调事实、边界、组合口径，适合短问题和工具型查询。",
             "- 保持结构清楚、简洁直接；不要牺牲安全边界。",
+            "- 如果只是解释概念，不要主动接入当前组合比例、cash reserve、DCA、target allocation、market temperature 或 portfolio snapshot。",
+            "- 只有用户明确问“对我的组合意味着什么 / 我的配置怎样理解 / 结合我的持仓”时，才接入组合含义。",
         ]
     )
+
+
+def build_question_intent_policy_section(user_question: str, answer_style: str) -> str:
+    question = user_question or ""
+    if _standard_concept_without_portfolio(question, answer_style):
+        return "- intent: standard_concept_explanation; explain the concept only; do not cite portfolio, DCA, cash reserve, targets, market temperature, or current_holdings."
+    if _is_recession_asset_role_question(question, answer_style):
+        return "- intent: recession_asset_role; cover S&P 500 broad equity/profits/discount-rate risk, Nasdaq growth/long-duration sensitivity, short bonds as liquidity/low-duration buffer, and gold as tail-risk/real-rate/USD/safe-haven exposure; no trade orders."
+    if _question_requests_latest_market_data(question):
+        return "- intent: latest_market_data_boundary; if local context does not provide PE, valuation, ETF price, yield point, gold price, FedWatch, or external source, say it is not provided and use framework analysis only."
+    return "- intent: general_answer"
+
+
+def build_critical_facts_for_question(
+    context_pack: dict[str, Any],
+    user_question: str,
+    answer_style: str,
+) -> str:
+    if (answer_style or "standard") == "standard" and _question_looks_like_concept_explanation(
+        user_question
+    ):
+        return "\n".join(
+            [
+                "## Concept Question Boundary",
+                "- Critical market and portfolio facts are intentionally omitted for this standard concept explanation.",
+                "- Use the context only for boundaries; do not cite current holdings, DCA, cash reserve, market temperature, or target allocation unless the user asks for portfolio implications.",
+            ]
+        )
+    return build_critical_facts_section(context_pack)
+
+
+def _question_asks_portfolio_context(question: str) -> bool:
+    terms = ("我的组合", "对我的组合", "我的配置", "我的持仓", "结合我的", "current_holdings", "持仓")
+    return any(term in question for term in terms)
+
+
+def _standard_concept_without_portfolio(question: str, answer_style: str) -> bool:
+    return (
+        (answer_style or "standard") == "standard"
+        and _question_looks_like_concept_explanation(question)
+        and not _question_asks_portfolio_context(question)
+    )
+
+
+def _question_looks_like_concept_explanation(question: str) -> bool:
+    lower = question.lower()
+    concept_terms = (
+        "什么是",
+        "是什么",
+        "为什么",
+        "关系",
+        "怎么理解",
+        "解释",
+        "实际利率",
+        "收益率曲线",
+        "美债收益率",
+        "债券价格",
+        "黄金价格",
+        "term premium",
+        "real rate",
+        "yield curve",
+    )
+    return any(term in lower or term in question for term in concept_terms)
+
+
+def _is_recession_asset_role_question(question: str, answer_style: str) -> bool:
+    if (answer_style or "standard") != "analyst_memo":
+        return False
+    lower = (question or "").lower()
+    recession_terms = ("衰退", "经济下行", "软着陆", "recession", "hard landing")
+    asset_terms = ("标普", "纳指", "短债", "黄金", "sp500", "nasdaq", "gold")
+    return any(term in lower for term in recession_terms) and any(term in lower for term in asset_terms)
+
+
+def _question_requests_latest_market_data(question: str) -> bool:
+    lower = question.lower()
+    terms = ("最新", "当前", "现在", "pe", "估值", "市值", "收益率", "黄金价格", "fedwatch", "reuters", "factset", "goldman", "cme")
+    return any(term in lower for term in terms)
 
 
 def _repair_evaluator_status(
@@ -740,8 +866,16 @@ def build_eval_case_policy_section(case: dict[str, Any] | None, user_question: s
     return "\n".join([*base, *policies.get(str(case_id), []), *repair_lines])
 
 
-def _required_output_format(eval_case: dict[str, Any] | None) -> str:
+def _required_output_format(
+    eval_case: dict[str, Any] | None,
+    user_question: str = "",
+    answer_style: str = "standard",
+) -> str:
     case_id = eval_case.get("id") if isinstance(eval_case, dict) else None
+    if case_id is None and _standard_concept_without_portfolio(user_question, answer_style):
+        return "请用中文简洁解释概念和机制；如涉及黄金，可补充机会成本、美元、避险需求和通胀预期；不要输出组合比例、target allocation、cash reserve、DCA、market temperature、portfolio snapshot 或交易建议。"
+    if case_id is None and _is_recession_asset_role_question(user_question, answer_style):
+        return "请用中文按 analyst memo 风格回答：先说明这是衰退情境分析而非短期预测，再分别解释标普500、纳指100、短债、黄金的角色，最后只用相对目标、风险暴露、观察方向、阈值复核和年末复核语言说明组合含义；不要写建议行动、减配、保持高配、具体买卖金额或交易命令。"
     if case_id == "market_overheat_portfolio":
         return "\n".join(
             [
@@ -955,10 +1089,25 @@ def _required_output_format(eval_case: dict[str, Any] | None) -> str:
     )
 
 
-def _build_mandatory_answer_facts(context_pack: dict[str, Any]) -> str:
+def _build_mandatory_answer_facts(
+    context_pack: dict[str, Any],
+    user_question: str = "",
+    answer_style: str = "standard",
+) -> str:
     context_json = context_pack.get("context_json", {}) if isinstance(context_pack, dict) else {}
     if not isinstance(context_json, dict):
         return "- mandatory facts unavailable."
+
+    if (answer_style or "standard") == "standard" and _question_looks_like_concept_explanation(
+        user_question
+    ):
+        return "\n".join(
+            [
+                "- This is a standard concept explanation.",
+                "- Do not cite portfolio weights, DCA, cash reserve, target allocation, market temperature, or current_holdings unless the user explicitly asks for portfolio implications.",
+                "- Answer the concept directly and keep it concise.",
+            ]
+        )
 
     portfolio = context_json.get("portfolio_context", {})
     assessments = context_json.get("rule_based_assessments", {})
@@ -1046,7 +1195,7 @@ def build_critical_facts_section(context_pack: dict[str, Any]) -> str:
         "- risk_level wording: medium means 中等 / 中等风险水平, not 中性.",
         f"- SP500 1m/3m change: {_history_return_line(history_features.get('spy'), label='SPY proxy for S&P 500')}",
         f"- NASDAQ 1m/3m change: {_history_return_line(history_features.get('qqq'), label='QQQ proxy for Nasdaq 100')}",
-        f"- DGS10 latest: {_format_number(_nested(market_facts, ('dgs10', 'value')))}",
+        "- DGS10: local context may contain a snapshot, but do not quote an exact yield point unless the question explicitly asks for a context-provided value; never present it as real-time.",
         f"- CPI YoY: {_format_yoy(_nested(current_regime, ('inflation', 'cpi_yoy', 'end_yoy')))}",
         f"- PCE YoY: {_format_yoy(_nested(current_regime, ('inflation', 'pce_yoy', 'end_yoy')))}",
         "",

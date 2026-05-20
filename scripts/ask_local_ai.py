@@ -931,6 +931,8 @@ def _question_mentions_macro_regime_topic(question: str) -> bool:
     lower = text.lower()
     if not text.strip():
         return False
+    if "定投" in text:
+        return False
 
     rate_terms = (
         "收益率",
@@ -1020,6 +1022,13 @@ def _question_asks_yield_price_basics(question: str) -> bool:
         any(term in lower or term in text for term in yield_terms)
         and any(term in lower or term in text for term in bond_price_terms)
         and any(term in lower or term in text for term in basic_question_terms)
+    )
+
+
+def _question_mentions_recession_asset_roles(question: str) -> bool:
+    lower = (question or "").lower()
+    return any(term in lower for term in ("衰退", "经济下行", "软着陆", "recession", "hard landing")) and any(
+        term in lower for term in ("标普", "纳指", "短债", "黄金", "sp500", "nasdaq", "gold")
     )
 
 
@@ -1398,6 +1407,30 @@ def _apply_deterministic_answer_guardrails(
         notes.append("Prepended required market regime wording.")
 
     final_assessment = _assess_answer_guardrails(updated, holdings_source)
+    if final_assessment.get("action") == "context_only_fallback":
+        safe_answer = _build_context_only_safe_answer(
+            context_json,
+            user_question,
+            answer_style=answer_style,
+            eval_case=eval_case,
+        )
+        if safe_answer:
+            return {
+                "answer": safe_answer,
+                "notes": [
+                    *notes,
+                    "Replaced rewritten answer with deterministic context-only answer.",
+                    *[
+                        f"Guardrail trigger: {trigger.get('kind')}={trigger.get('pattern')}"
+                        for trigger in final_assessment.get("triggers", [])
+                    ],
+                ],
+                "answer_mode": "context_only_fallback",
+                "fallback_reason": final_assessment.get("reason"),
+                "guardrail_action": final_assessment.get("action"),
+                "guardrail_triggers": final_assessment.get("triggers", []),
+            }
+
     return {
         "answer": updated,
         "notes": [
@@ -1461,6 +1494,12 @@ def _rewrite_trade_directive_wording(answer: str) -> str:
         ("需减持", "相对目标偏高"),
         ("减持", "再平衡观察"),
         ("增持", "再平衡观察"),
+        ("优化建议", "观察方向"),
+        ("建议行动", "观察方向"),
+        ("适度增配", "作为后续复核观察"),
+        ("小幅增配", "作为后续复核观察"),
+        ("动态调减", "作为后续复核观察"),
+        ("调减", "复核观察"),
     )
     updated = answer
     for source, target in replacements:
@@ -1560,7 +1599,6 @@ def _answer_guardrail_triggers(
                 "snippet": "",
             }
         )
-
     severe_amount_patterns = (
         r"买入\s*[\d,]+(?:\.\d+)?\s*(?:元|人民币|块)?",
         r"卖出\s*[\d,]+(?:\.\d+)?\s*(?:元|人民币|块)?",
@@ -1845,6 +1883,23 @@ def _build_context_only_safe_answer(
                 "",
                 "## 边界",
                 "这不是短期涨跌判断，也不是投资建议；context 没有提供的实时估值或外部来源不能补写。",
+            ]
+        )
+
+    if _question_mentions_recession_asset_roles(user_question):
+        return "\n".join(
+            [
+                "## 核心判断",
+                "这是衰退情境下的资产角色分析，不是短期涨跌预测，也不是交易指令。",
+                "",
+                "## 四类资产角色",
+                "- 标普500：广泛权益风险暴露，受企业盈利、风险偏好和折现率影响。",
+                "- 纳指100：更偏成长和长久期权益，通常对利率、流动性和风险偏好更敏感。",
+                "- 短债：主要承担波动缓冲、流动性和较低久期风险角色，不是收益保证。",
+                "- 黄金：与尾部风险、实际利率、美元和避险需求相关，但不是单向避险资产。",
+                "",
+                "## 组合含义",
+                "组合含义只能回到相对目标、风险暴露、观察方向、阈值复核和年末复核；不提供具体买卖金额、卖出比例或立即调整命令，也不把 cash reserve / 余额宝当成待配置资产。",
             ]
         )
 
@@ -2144,6 +2199,9 @@ def _build_hot_market_dca_context_only_answer(
         [
             "## 核心判断",
             "不能直接给“暂停、继续或加速定投”的交易命令；这不是交易指令，也不提供具体交易指令。市场偏热只能进入观察框架，不是短期涨跌预测。",
+            "",
+            "## 最新数据边界",
+            "本地 context 未提供最新 PE、估值、具体收益率点位、黄金价格或 FedWatch 概率；不能补具体数值或外部来源。",
             "",
             "## 市场温度",
             (
