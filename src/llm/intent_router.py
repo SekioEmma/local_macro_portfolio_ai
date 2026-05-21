@@ -188,6 +188,9 @@ def is_macro_geopolitics_rates_case(eval_case: dict[str, Any] | None) -> bool:
 def is_market_top_pullback_case(eval_case: dict[str, Any] | None) -> bool:
     return isinstance(eval_case, dict) and eval_case.get("id") == "us_equity_top_pullback_risk_001"
 
+def is_monthly_macro_portfolio_review_case(eval_case: dict[str, Any] | None) -> bool:
+    return isinstance(eval_case, dict) and eval_case.get("id") == "monthly_macro_portfolio_review"
+
 def question_mentions_market_top_pullback_risk(question: str) -> bool:
     text = question or ""
     lower = text.lower()

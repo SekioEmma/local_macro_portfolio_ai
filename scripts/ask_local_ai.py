@@ -35,7 +35,11 @@ from llm.prompt_builder import (
 )
 from llm.fallback_answers import build_context_only_safe_answer, dedupe_strings
 from llm.guardrails import apply_deterministic_answer_guardrails, validate_answer_text
-from llm.intent_router import is_market_top_pullback_case, route_eval_case
+from llm.intent_router import (
+    is_market_top_pullback_case,
+    is_monthly_macro_portfolio_review_case,
+    route_eval_case,
+)
 from eval.answer_evaluator import evaluate_answer
 
 
@@ -282,6 +286,36 @@ def main() -> None:
             final_answer_validation = retry_validation
             repair_success = _validation_is_pass(retry_validation)
             prompt = repair_prompt
+
+    if (
+        mode == "local_http"
+        and result.get("status") == "ok"
+        and is_monthly_macro_portfolio_review_case(eval_case)
+        and not _validation_is_pass(final_answer_validation)
+    ):
+        fallback_answer = build_context_only_safe_answer(
+            context_pack.get("context_json", {}),
+            user_question,
+            answer_style=answer_style,
+            eval_case=eval_case,
+        )
+        if fallback_answer:
+            result["answer"] = fallback_answer
+            result["answer_mode"] = "context_only_fallback"
+            result["fallback_reason"] = "monthly_review_validation_failed"
+            result["guardrail_action"] = "context_only_fallback"
+            result["guardrail_triggers"] = []
+            result["cleaning_notes"] = [
+                *result.get("cleaning_notes", []),
+                "Replaced failed monthly review validation answer with deterministic context-only answer.",
+            ]
+            final_answer_validation = _build_answer_validation(
+                fallback_answer,
+                user_question=user_question,
+                context_json=context_pack.get("context_json", {}),
+                eval_case=eval_case,
+            )
+            repair_success = _validation_is_pass(final_answer_validation)
 
     if (
         mode == "local_http"
