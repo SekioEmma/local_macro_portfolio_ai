@@ -552,9 +552,11 @@ def build_question_intent_policy_section(user_question: str, answer_style: str) 
                 "- Must separate three layers: 阶段性过热 / 回调风险, 中期趋势反转, 系统性危机。",
                 "- Must say AI 技术真实与估值透支可以同时存在。",
                 "- If local context does not provide latest PE, valuation, yields, oil, CPI/PPI, FedWatch, Reuters, FactSet, or other timestamped source data, say 本地 context 未提供; do not invent values or claim external lookup.",
+                "- Do not assert unverified market states such as 估值显著提升, 历史高位, 核心AI公司正快速实现收入增长, 整体市场健康度合理, Q3财报 unless local context explicitly provides them.",
                 "- Portfolio meaning is optional unless the user asks about their portfolio. If included, write only one boundary sentence using 相对目标配置, 相对风险暴露, 观察方向, 后续定投评估, 阈值复核, 年末复核, 再平衡评估; do not propose a holding stance.",
+                "- If local holding facts are used, sp500 / nasdaq100 / short_bond / gold high/low directions must match the context facts exactly; if unsure, quote the local snapshot direction rather than summarizing.",
                 "- Systemic crisis evidence must explicitly include 信用、融资、银行、就业、盈利、波动率。",
-                "- Do not use: 行动建议, 建议维持, 防御性持仓, 潜在机会, 增配, 减配, 应暂停定投, 应卖出, 应买入, 清仓, 等跌再买, 立即调整, 买入 X 元, 卖出 X 元, 弹性调整, 再平衡操作, 再平衡策略, 实时反馈, 实际决策, 优先执行, 校准。",
+                "- Do not use: 行动建议, 可适度优化持仓, 可适度优化科技股持仓, 维持现有配置, 严格执行策略, 严格执行纪律化定投, 建议维持, 防御性持仓, 潜在机会, 增配, 减配, 应暂停定投, 应卖出, 应买入, 清仓, 等跌再买, 立即调整, 买入 X 元, 卖出 X 元, 弹性调整, 再平衡操作, 再平衡策略, 实时反馈, 实际决策, 优先执行, 校准。",
                 "- Do not treat cash reserve / 余额宝 as deployable idle cash, and do not describe current_holdings.csv as real-time account sync.",
             ]
         )
@@ -586,11 +588,13 @@ def build_critical_facts_for_question(
                 "- Do not quote current portfolio weights, account values, holding dates, DCA amounts, or cash reserve amounts unless the user explicitly asks for portfolio details.",
                 "- Do not quote SPY, QQQ, GLD, NVDA prices, PE, valuation multiples, CPI/PPI, oil, Treasury yields, credit spreads, FedWatch, Reuters, FactSet, Goldman, CME, or Trading Economics data unless the local context explicitly provides timestamped values.",
                 "- If the local context does not provide those latest values or sources, say 本地 context 未提供这些最新数据，只能做框架分析。",
+                "- Do not assert unverified states such as 估值显著提升, 历史高位, 核心AI公司正快速实现收入增长, 整体市场健康度合理, Q3财报.",
                 "- Required framing: 回调风险上升可以成立，但确认见顶、趋势反转或系统性危机需要更强证据。",
                 "- Required layers: 阶段性过热 / 回调风险; 中期趋势反转; 系统性危机。",
                 "- Required AI framing: AI 技术趋势可以真实存在，但估值仍可能透支。",
                 "- Required crisis evidence: 系统性危机需要信用、融资、银行、就业、盈利、波动率等多信号确认。",
                 "- Portfolio meaning is optional unless the user asks about their portfolio. If included, write only one boundary sentence using relative target allocation, relative risk exposure, observation direction, later DCA review, threshold review, year-end review, and rebalancing assessment; do not propose a holding stance or opportunity.",
+                *_market_top_portfolio_direction_lines(context_pack, user_question),
             ]
         )
     return build_critical_facts_section(context_pack)
@@ -599,6 +603,31 @@ def build_critical_facts_for_question(
 def _question_asks_portfolio_context(question: str) -> bool:
     terms = ("我的组合", "对我的组合", "我的配置", "我的持仓", "结合我的", "current_holdings", "持仓")
     return any(term in question for term in terms)
+
+
+def _market_top_portfolio_direction_lines(
+    context_pack: dict[str, Any],
+    user_question: str,
+) -> list[str]:
+    if not _question_asks_portfolio_context(user_question):
+        return []
+    context_json = context_pack.get("context_json", {}) if isinstance(context_pack, dict) else {}
+    portfolio = context_json.get("portfolio_context", {}) if isinstance(context_json, dict) else {}
+    if not isinstance(portfolio, dict):
+        return [
+            "- Portfolio direction facts are unavailable; do not summarize holdings as high or low versus target.",
+        ]
+    flags = portfolio.get("deviation_flags", {})
+    if not isinstance(flags, dict):
+        flags = {}
+    return [
+        "- If discussing the current long-term DCA portfolio, use these local snapshot directions exactly:",
+        f"  - sp500: {_allocation_label(flags.get('sp500'))}.",
+        f"  - nasdaq100: {_allocation_label(flags.get('nasdaq100'))}.",
+        f"  - short_bond: {_allocation_label(flags.get('short_bond'))}.",
+        f"  - gold: {_allocation_label(flags.get('gold'))}.",
+        "- Never write that sp500 or nasdaq100 is above target when these local facts say underweight / 相对目标偏低.",
+    ]
 
 
 def _standard_concept_without_portfolio(question: str, answer_style: str) -> bool:
@@ -719,10 +748,12 @@ def _required_facts_for_repair_case(case_id: str) -> str:
             "- Must separate three layers: 阶段性过热 / 回调风险; 中期趋势反转; 系统性危机。",
             "- Must explain that AI 技术真实与估值透支可以同时存在。",
             "- Must say 本地 context 未提供最新 PE、估值倍数、收益率、油价、CPI/PPI、FedWatch、Reuters/FactSet 等可核验数据 if those fields are not explicitly timestamped in the local context.",
+            "- Do not assert 估值显著提升、历史高位、核心AI公司正快速实现收入增长、整体市场健康度合理、Q3财报 unless local context explicitly provides them.",
             "- Do not quote current prices, PE, CPI/PPI, oil, Treasury yields, credit spreads, FedWatch probabilities, or media/vendor claims unless the local context explicitly provides timestamped data.",
             "- Systemic crisis requires multiple signals such as 信用、融资、银行、就业、盈利、波动率; do not infer it from a single valuation or pullback signal.",
             "- Portfolio meaning is optional unless the user asks about their portfolio; if included, use only one boundary sentence with 相对目标配置、相对风险暴露、观察方向、后续定投评估、阈值复核、年末复核、再平衡评估。",
-            "- Do not use trade, stance, opportunity, or operation wording: 行动建议、建议维持、防御性持仓、潜在机会、增配、减配、应暂停定投、应卖出、应买入、清仓、等跌再买、立即调整、买入 X 元、卖出 X 元、弹性调整、再平衡操作、再平衡策略、实时反馈、实际决策、优先执行、校准。",
+            "- If portfolio facts are used, sp500/nasdaq100/short_bond/gold directions must match local context exactly; do not reverse high/low target direction.",
+            "- Do not use trade, stance, opportunity, or operation wording: 行动建议、可适度优化持仓、可适度优化科技股持仓、维持现有配置、严格执行策略、严格执行纪律化定投、建议维持、防御性持仓、潜在机会、增配、减配、应暂停定投、应卖出、应买入、清仓、等跌再买、立即调整、买入 X 元、卖出 X 元、弹性调整、再平衡操作、再平衡策略、实时反馈、实际决策、优先执行、校准。",
             "- Do not treat cash reserve / 余额宝 as deployable idle cash, and do not describe current_holdings.csv as real-time account sync.",
         ],
         "historical_outcome_not_forecast": [
@@ -848,9 +879,11 @@ def build_eval_case_policy_section(case: dict[str, Any] | None, user_question: s
             "- 必须分清三层：阶段性过热 / 回调风险；中期趋势反转；系统性危机。",
             "- 必须说明 AI 技术真实与估值透支可以同时存在。",
             "- 如果本地 context 没有带时间戳的最新 PE、估值倍数、收益率、油价、CPI/PPI、FedWatch、Reuters/FactSet 等数据，必须说明本地 context 未提供，不能编造或声称已经查询。",
+            "- 不得断言估值显著提升、历史高位、核心AI公司正快速实现收入增长、整体市场健康度合理、Q3财报，除非本地 context 明确提供。",
             "- 必须说明系统性危机需要信用、融资、银行、就业、盈利、波动率等多信号确认。",
             "- 组合含义可省略；如写，只能用一句边界说明相对目标配置、相对风险暴露、观察方向、后续定投评估、阈值复核、年末复核和再平衡评估，不得写持仓立场、机会、执行、策略或交易命令。",
-            "- 禁止使用：行动建议、建议维持、防御性持仓、潜在机会、增配、减配、暂停定投、应买入、应卖出、清仓、等跌再买、立即调整、再平衡操作、再平衡策略、实时反馈、实际决策、优先执行、校准。",
+            "- 如果使用组合事实，sp500/nasdaq100/short_bond/gold 的高配/低配方向必须与本地 context 一致，不得说反。",
+            "- 禁止使用：行动建议、可适度优化持仓、可适度优化科技股持仓、维持现有配置、严格执行策略、严格执行纪律化定投、建议维持、防御性持仓、潜在机会、增配、减配、暂停定投、应买入、应卖出、清仓、等跌再买、立即调整、再平衡操作、再平衡策略、实时反馈、实际决策、优先执行、校准。",
         ],
         "historical_outcome_not_forecast": [
             "- 必须逐字出现“historical outcome is not forecast”或“历史结果不是预测”。",
@@ -950,14 +983,16 @@ def _required_output_format(
                 "分别说明：阶段性过热 / 回调风险；中期趋势反转；系统性危机。",
                 "## 数据边界",
                 "如果本地 context 未提供最新 PE、估值倍数、收益率、油价、CPI/PPI、FedWatch、Reuters/FactSet 等带时间戳的可核验数据，必须明确说本地 context 未提供这些最新数据，不能声称已经查询，不能补具体数值或来源。",
+                "不得断言估值显著提升、历史高位、核心AI公司正快速实现收入增长、整体市场健康度合理、Q3财报，除非本地 context 明确提供。",
                 "## AI 与估值",
                 "必须说明 AI 技术真实与估值透支可以同时存在；风险来自估值、利率/真实利率、通胀、油价、集中度、盈利兑现和流动性等框架变量。",
                 "## 系统性危机证据",
                 "必须逐字包含：系统性危机需要信用、融资、银行、就业、盈利、波动率等多信号确认，不能由单一估值或回调信号推出。",
                 "## 对组合的含义",
-                "如果用户没有明确询问自己的组合，只能写一句边界说明：若映射到组合层面，只能用于相对目标配置、相对风险暴露、观察方向、后续定投评估、阈值复核、年末复核和再平衡评估，不构成交易指令。不输出当前账户金额、持仓日期、组合比例、DCA 金额或 cash reserve 金额；不要写持仓立场、机会、组合操作、策略、执行、决策、校准、调整动作或实时反馈。",
+                "如果用户询问自己的组合，必须按本地快照方向写：sp500 和 nasdaq100 低配 / 相对目标偏低，short_bond 和 gold 高配 / 相对目标偏高；如果不确定，就写按本地快照的相对目标方向理解，不要概括成略高或略低。",
+                "组合含义只能用一句边界说明：若映射到组合层面，只能用于相对目标配置、相对风险暴露、观察方向、后续定投评估、阈值复核、年末复核和再平衡评估，不构成交易指令。不输出当前账户金额、持仓日期、DCA 金额或 cash reserve 金额；不要写持仓立场、机会、组合操作、策略、执行、决策、校准、调整动作或实时反馈。",
                 "## 禁止表达",
-                "不得出现：行动建议、建议维持、防御性持仓、潜在机会、增配、减配、应暂停定投、暂停定投、应卖出、应买入、清仓、等跌再买、立即调整、买入 X 元、卖出 X 元、具体买卖金额、弹性调整、再平衡操作、再平衡策略、实时反馈、实际决策、优先执行、校准。",
+                "不得出现：行动建议、可适度优化持仓、可适度优化科技股持仓、维持现有配置、严格执行策略、严格执行纪律化定投、建议维持、防御性持仓、潜在机会、增配、减配、应暂停定投、暂停定投、应卖出、应买入、清仓、等跌再买、立即调整、买入 X 元、卖出 X 元、具体买卖金额、弹性调整、再平衡操作、再平衡策略、实时反馈、实际决策、优先执行、校准。",
                 "不得把 cash reserve / 余额宝当成待配置资产，不得把 current_holdings.csv 说成实时账户同步。",
             ]
         )
@@ -1202,8 +1237,10 @@ def _build_mandatory_answer_facts(
                 "- Must include three layers: 阶段性过热 / 回调风险; 中期趋势反转; 系统性危机。",
                 "- Must include: AI 技术真实与估值透支可以同时存在。",
                 "- Must include: 本地 context 未提供最新 PE、估值倍数、收益率、油价、CPI/PPI、FedWatch、Reuters/FactSet 等可核验数据 when not explicitly timestamped in local context.",
+                "- Do not assert 估值显著提升、历史高位、核心AI公司正快速实现收入增长、整体市场健康度合理、Q3财报 unless local context explicitly provides them.",
                 "- Must include exactly: 系统性危机需要信用、融资、银行、就业、盈利、波动率等多信号确认。",
                 "- Do not cite portfolio weights, account values, holding dates, DCA amounts, cash reserve amounts, or current_holdings snapshot details unless the user explicitly asks for portfolio details.",
+                "- If portfolio facts are used, sp500/nasdaq100/short_bond/gold directions must match local context exactly; sp500 and nasdaq100 must not be described as above target when the local snapshot says underweight.",
                 "- Do not use trade, stance, opportunity, strategy, decision, execution, calibration, adjustment, or operation wording; if portfolio implications are included, use only one boundary sentence with 相对目标配置、相对风险暴露、观察方向、后续定投评估、阈值复核、年末复核、再平衡评估.",
             ]
         )
