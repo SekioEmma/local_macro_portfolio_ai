@@ -689,3 +689,9 @@ fallback 分层：
 ## 下一阶段计划
 
 MVP v1 进入冻结与日常使用观察期。下一阶段应优先处理真实日常运行中暴露的文档缺口、流程缺口或高频故障，不主动扩大 guardrail、不切换默认模型、不接云端 API、不训练或微调模型。
+
+### Stage 6.12: MVP v1 observation readiness
+
+Status: 6.11b stabilization passed, and MVP v1 observation is ready.
+
+The project should now prioritize daily use observation, factual boundaries, privacy boundaries, and long-term discipline. Known limitation: fallback share remains high, but final answers are guarded for safety. Do not expand features, add distillation material, or continue refactoring unless repeated observation failures justify a new development stage.
