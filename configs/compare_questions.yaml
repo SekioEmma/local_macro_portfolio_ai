@@ -1,0 +1,24 @@
+questions:
+  - id: market_overheat_portfolio
+    style: analyst_memo
+    question: "当前市场是否过热？对我的组合意味着什么？"
+
+  - id: market_top_ai_valuation
+    style: analyst_memo
+    question: "最近很多人说美股涨得太高，AI和科技股估值也很贵，接下来回调风险越来越大。你怎么看这种判断？这是不是说明美股已经见顶了？对我的长期定投组合意味着什么？"
+
+  - id: normal_pullback_vs_crisis
+    style: analyst_memo
+    question: "那么是不是基本可以判断未来的回撤属于美股正常的回调而不是危机或股灾？我不担心回调，但是担心美股的增长与修复能力，比如2022-2023那样的横盘波动是很难受的。"
+
+  - id: hot_market_dca_pause
+    style: analyst_memo
+    question: "如果市场偏热但我长期定投，是不是应该暂停？"
+
+  - id: dotcom_ai_bubble
+    style: analyst_memo
+    question: "AI和大型科技股现在是不是类似2000年互联网泡沫？相似和不相似的地方分别是什么？对我的纳指配置有什么含义？"
+
+  - id: monthly_macro_portfolio_review
+    style: analyst_memo
+    question: "帮我做一次本月宏观和组合复盘：市场温度、持仓偏离、DCA、现金准备金和数据限制应该怎么看？"

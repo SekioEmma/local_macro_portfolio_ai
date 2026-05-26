@@ -1,0 +1,21 @@
+external_llm:
+  deepseek:
+    enabled: false
+    base_url: "https://api.deepseek.com"
+    flash_model: "deepseek-v4-flash"
+    pro_model: "deepseek-v4-pro"
+    default_model: "deepseek-v4-flash"
+    timeout_seconds: 240
+    temperature: 0.2
+    max_output_tokens: 4096
+    pricing_cny_per_million_tokens:
+      deepseek-v4-flash:
+        input_cache_hit: 0.02
+        input_cache_miss: 1.0
+        output: 2.0
+      deepseek-v4-pro:
+        input_cache_hit: 0.025
+        input_cache_miss: 3.0
+        output: 6.0
+    save_full_prompt: false
+    save_full_response: true
