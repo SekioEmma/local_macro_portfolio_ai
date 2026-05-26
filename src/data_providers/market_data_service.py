@@ -11,6 +11,15 @@ from . import alpha_vantage_provider, fed_provider, fred_provider, yfinance_prov
 MARKET_DATA_KEYS = ("sp500", "nasdaq", "nasdaq100", "gold")
 MACRO_DATA_KEYS = ("dgs10", "fedfunds", "cpi", "pce", "nonfarm")
 FX_DATA_KEYS = ("usd_cny",)
+FINANCIAL_CONDITION_KEYS = (
+    "high_yield_spread",
+    "vix",
+    "real_yield_10y",
+    "breakeven_inflation_10y",
+    "yield_curve_10y2y",
+    "valuation_proxy",
+    "fedwatch_probability",
+)
 REQUIRED_CORE_KEYS = (
     "sp500",
     "nasdaq",
@@ -118,9 +127,61 @@ def get_core_market_snapshot(config_path: str = "configs/data_sources.yaml") -> 
             key: get_market_item(key, config)
             for key in FX_DATA_KEYS
         },
+        "financial_conditions": {
+            key: get_financial_condition_item(key, config)
+            for key in FINANCIAL_CONDITION_KEYS
+        },
         "official_sources": fed_provider.get_fed_public_sources(),
         "generated_at": generated_at,
     }
+
+
+def get_financial_condition_item(key: str, config: dict) -> dict:
+    generated_at = _utc_now()
+    financial_config = _financial_condition_config(key, config)
+    if not financial_config:
+        return _financial_condition_not_configured(
+            key=key,
+            name=key,
+            timestamp=generated_at,
+            error=f"financial_conditions.{key} not configured",
+        )
+
+    provider = str(financial_config.get("provider") or "").strip().lower()
+    name = str(financial_config.get("name") or key)
+
+    if provider == "fred":
+        series_id = str(financial_config.get("series_id") or "").strip()
+        if not series_id:
+            return _financial_condition_not_configured(
+                key=key,
+                name=name,
+                timestamp=generated_at,
+                error=f"financial_conditions.{key}.series_id not configured",
+                financial_config=financial_config,
+            )
+        return _fred_financial_condition_item(
+            key=key,
+            series_id=series_id,
+            timestamp=generated_at,
+            financial_config=financial_config,
+        )
+
+    if provider in {"not_available", "not_configured", "missing_data"}:
+        return _financial_condition_not_available(
+            key=key,
+            name=name,
+            timestamp=generated_at,
+            financial_config=financial_config,
+        )
+
+    return _financial_condition_error(
+        key=key,
+        name=name,
+        timestamp=generated_at,
+        error=f"Unsupported financial condition provider: {provider or 'missing'}",
+        financial_config=financial_config,
+    )
 
 
 def get_market_item(key: str, config: dict) -> dict:
@@ -194,6 +255,58 @@ def get_market_item(key: str, config: dict) -> dict:
     )
 
 
+def _fred_financial_condition_item(
+    *,
+    key: str,
+    series_id: str,
+    timestamp: str,
+    financial_config: dict,
+) -> dict:
+    result = fred_provider.get_fred_latest(series_id)
+    attempt = {
+        "source": result.get("source") or "FRED",
+        "status": result.get("status", "error"),
+        "error": result.get("error"),
+        "timestamp": result.get("timestamp") or timestamp,
+        "series_id": result.get("series_id") or series_id,
+        "observation_date": result.get("observation_date"),
+        "source_tier": financial_config.get("source_tier"),
+    }
+
+    value = _to_float_or_none(result.get("value"))
+    if result.get("status") != "ok" or value is None:
+        return _financial_condition_error(
+            key=key,
+            name=str(financial_config.get("name") or key),
+            timestamp=result.get("timestamp") or timestamp,
+            error=str(result.get("error") or "FRED financial condition request failed"),
+            financial_config=financial_config,
+            series_id=series_id,
+            source=result.get("source") or "FRED",
+            observation_date=result.get("observation_date"),
+            attempted_sources=[attempt],
+        )
+
+    return {
+        "key": key,
+        "name": financial_config.get("name") or key,
+        "value": value,
+        "unit": financial_config.get("unit"),
+        "observation_date": result.get("observation_date"),
+        "source": result.get("source") or "FRED",
+        "source_tier": financial_config.get("source_tier"),
+        "freshness": "unknown",
+        "status": "ok",
+        "error": None,
+        "interpretation_hint": financial_config.get("interpretation_hint"),
+        "risk_relevance": financial_config.get("risk_relevance"),
+        "asset_type": financial_config.get("asset_type"),
+        "series_id": result.get("series_id") or series_id,
+        "timestamp": result.get("timestamp") or timestamp,
+        "attempted_sources": [attempt],
+    }
+
+
 def _provider_candidates(key: str, config: dict) -> list[dict]:
     if key in {"sp500", "nasdaq", "dgs10", "fedfunds", "cpi", "pce", "nonfarm"}:
         return [_fred_candidate(key, config)]
@@ -227,6 +340,110 @@ def _provider_candidates(key: str, config: dict) -> list[dict]:
         ]
 
     return []
+
+
+def _financial_condition_config(key: str, config: dict) -> dict:
+    financial_conditions = _optional_mapping(config, "financial_conditions")
+    item = financial_conditions.get(key)
+    return item if isinstance(item, dict) else {}
+
+
+def _financial_condition_base(
+    *,
+    key: str,
+    name: str,
+    timestamp: str,
+    status: str,
+    error: str | None,
+    financial_config: dict | None = None,
+    series_id: str | None = None,
+    source: str | None = None,
+    observation_date: str | None = None,
+    attempted_sources: list[dict] | None = None,
+) -> dict:
+    financial_config = financial_config if isinstance(financial_config, dict) else {}
+    return {
+        "key": key,
+        "name": name,
+        "value": None,
+        "unit": financial_config.get("unit"),
+        "observation_date": observation_date,
+        "source": source or financial_config.get("source") or "not_configured",
+        "source_tier": financial_config.get("source_tier") or "not_available",
+        "freshness": "not_available" if status in {"not_available", "not_configured"} else "unknown",
+        "status": status,
+        "error": error,
+        "interpretation_hint": financial_config.get("interpretation_hint"),
+        "risk_relevance": financial_config.get("risk_relevance"),
+        "asset_type": financial_config.get("asset_type"),
+        "series_id": series_id or financial_config.get("series_id"),
+        "timestamp": timestamp,
+        "attempted_sources": attempted_sources or [],
+    }
+
+
+def _financial_condition_not_available(
+    *,
+    key: str,
+    name: str,
+    timestamp: str,
+    financial_config: dict,
+) -> dict:
+    return _financial_condition_base(
+        key=key,
+        name=name,
+        timestamp=timestamp,
+        status="not_available",
+        error=financial_config.get("unavailable_reason")
+        or "Financial condition is not available from configured sources.",
+        financial_config=financial_config,
+        source="not_available",
+    )
+
+
+def _financial_condition_not_configured(
+    *,
+    key: str,
+    name: str,
+    timestamp: str,
+    error: str,
+    financial_config: dict | None = None,
+) -> dict:
+    return _financial_condition_base(
+        key=key,
+        name=name,
+        timestamp=timestamp,
+        status="not_configured",
+        error=error,
+        financial_config=financial_config,
+        source="not_configured",
+    )
+
+
+def _financial_condition_error(
+    *,
+    key: str,
+    name: str,
+    timestamp: str,
+    error: str,
+    financial_config: dict,
+    series_id: str | None = None,
+    source: str | None = None,
+    observation_date: str | None = None,
+    attempted_sources: list[dict] | None = None,
+) -> dict:
+    return _financial_condition_base(
+        key=key,
+        name=name,
+        timestamp=timestamp,
+        status="error",
+        error=error,
+        financial_config=financial_config,
+        series_id=series_id,
+        source=source,
+        observation_date=observation_date,
+        attempted_sources=attempted_sources,
+    )
 
 
 def _fred_candidate(key: str, config: dict, notes: str | None = None) -> dict:

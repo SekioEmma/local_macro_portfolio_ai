@@ -173,6 +173,31 @@ data_quality:
     max_stale_days: 3
     source_tier: "third_party_api_or_manual_fallback"
     importance: "optional"
+  high_yield_spread:
+    expected_frequency: "daily"
+    max_stale_days: 7
+    source_tier: "official_or_public_data_api"
+    importance: "financial_conditions"
+  vix:
+    expected_frequency: "daily"
+    max_stale_days: 7
+    source_tier: "official_or_public_data_api"
+    importance: "financial_conditions"
+  real_yield_10y:
+    expected_frequency: "daily"
+    max_stale_days: 7
+    source_tier: "official_or_public_data_api"
+    importance: "financial_conditions"
+  breakeven_inflation_10y:
+    expected_frequency: "daily"
+    max_stale_days: 7
+    source_tier: "official_or_public_data_api"
+    importance: "financial_conditions"
+  yield_curve_10y2y:
+    expected_frequency: "daily"
+    max_stale_days: 7
+    source_tier: "official_or_public_data_api"
+    importance: "financial_conditions"
 
 macro_regime_series:
   sp500:
@@ -220,6 +245,78 @@ macro_regime_series:
     name: "USD/CNY"
     frequency: "daily"
     role: "fx"
+
+financial_condition_keys:
+  - high_yield_spread
+  - vix
+  - real_yield_10y
+  - breakeven_inflation_10y
+  - yield_curve_10y2y
+  - valuation_proxy
+  - fedwatch_probability
+
+financial_conditions:
+  high_yield_spread:
+    provider: "fred"
+    series_id: "BAMLH0A0HYM2"
+    name: "US High Yield Option-Adjusted Spread"
+    unit: "percent"
+    asset_type: "credit_spread"
+    source_tier: "official_or_public_data_api"
+    interpretation_hint: "Higher values may indicate rising credit stress."
+    risk_relevance: "Helps distinguish valuation pullback from credit stress."
+  vix:
+    provider: "fred"
+    series_id: "VIXCLS"
+    name: "CBOE Volatility Index"
+    unit: "index"
+    asset_type: "volatility"
+    source_tier: "official_or_public_data_api"
+    interpretation_hint: "Higher values indicate elevated option-implied equity volatility."
+    risk_relevance: "Helps assess volatility stress without treating one reading as a trading signal."
+  real_yield_10y:
+    provider: "fred"
+    series_id: "DFII10"
+    name: "10-Year Treasury Inflation-Indexed Security Real Yield"
+    unit: "percent"
+    asset_type: "real_rate"
+    source_tier: "official_or_public_data_api"
+    interpretation_hint: "Higher real yields can pressure growth valuations and raise gold opportunity cost."
+    risk_relevance: "Connects discount-rate pressure to growth equities and gold."
+  breakeven_inflation_10y:
+    provider: "fred"
+    series_id: "T10YIE"
+    name: "10-Year Breakeven Inflation Rate"
+    unit: "percent"
+    asset_type: "inflation_expectation"
+    source_tier: "official_or_public_data_api"
+    interpretation_hint: "Higher values may indicate firmer market-implied inflation expectations."
+    risk_relevance: "Helps separate inflation-pressure risk from pure growth concerns."
+  yield_curve_10y2y:
+    provider: "fred"
+    series_id: "T10Y2Y"
+    name: "10-Year Treasury Minus 2-Year Treasury Spread"
+    unit: "percentage_points"
+    asset_type: "yield_curve"
+    source_tier: "official_or_public_data_api"
+    interpretation_hint: "Lower or inverted values indicate tighter curve conditions, not a standalone recession call."
+    risk_relevance: "Helps frame recession and policy-cycle pressure."
+  valuation_proxy:
+    provider: "not_available"
+    name: "Valuation Proxy"
+    unit: null
+    source_tier: "not_available"
+    interpretation_hint: "Valuation proxy is not available from configured sources."
+    risk_relevance: "Prevents the model from inventing PE, forward PE, CAPE, or valuation percentile data."
+    unavailable_reason: "No stable configured public API for audited valuation proxy."
+  fedwatch_probability:
+    provider: "not_available"
+    name: "FedWatch Probability"
+    unit: null
+    source_tier: "not_available"
+    interpretation_hint: "FedWatch probability is not available from configured sources."
+    risk_relevance: "Prevents the model from inventing market-implied Fed probability data."
+    unavailable_reason: "No configured official or stable public API for FedWatch probability."
 
 crisis_windows:
   global_financial_crisis:

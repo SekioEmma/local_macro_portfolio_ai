@@ -46,6 +46,7 @@ def build_daily_report_json(
     market_temperature: dict,
 ) -> dict:
     market_summary = _build_market_summary(market_snapshot)
+    financial_conditions = _build_financial_conditions_summary(market_snapshot)
     temperature_assessment = market_temperature.get("temperature_assessment", {})
     temperature_summary = _build_temperature_summary(temperature_assessment)
     data_limitations = _build_data_limitations(
@@ -107,6 +108,7 @@ def build_daily_report_json(
         ),
         "dca_daily_plan": portfolio_snapshot.get("dca_daily_plan", {}),
         "market_summary": market_summary,
+        "financial_conditions": financial_conditions,
         "temperature_summary": temperature_summary,
         "data_sources": _extract_data_sources(market_snapshot, market_temperature),
         "data_limitations": data_limitations,
@@ -193,25 +195,29 @@ def render_daily_report_markdown(report: dict) -> str:
         "",
         _market_table(report["market_summary"]),
         "",
-        "## 5. Market Temperature",
+        "## 5. Market Stress / Financial Conditions Snapshot",
+        "",
+        _financial_conditions_table(report.get("financial_conditions", {})),
+        "",
+        "## 6. Market Temperature",
         "",
         _temperature_table(report["temperature_summary"]),
         "",
         f"Methodology: {_display(report['temperature_summary'].get('methodology_note'))}",
         "",
-        "## 6. Rule-based Observations",
+        "## 7. Rule-based Observations",
         "",
         _bullet_list(report.get("rule_based_observations", [])),
         "",
-        "## 7. Data Sources",
+        "## 8. Data Sources",
         "",
         _data_sources_table(report.get("data_sources", [])),
         "",
-        "## 8. Data Limitations",
+        "## 9. Data Limitations",
         "",
         _bullet_list(report.get("data_limitations", []), empty_text="No material data limitations recorded."),
         "",
-        "## 9. Disclaimer",
+        "## 10. Disclaimer",
         "",
         report.get("disclaimer", DISCLAIMER),
         "",
@@ -267,6 +273,68 @@ def _market_item_summary(item: Any, fallback_name: str) -> dict:
         "error": item.get("error"),
         "attempted_sources": item.get("attempted_sources", []),
         "data_quality": item.get("data_quality", {}),
+    }
+
+
+def _build_financial_conditions_summary(market_snapshot: dict) -> dict:
+    configured_order = (
+        "high_yield_spread",
+        "vix",
+        "real_yield_10y",
+        "breakeven_inflation_10y",
+        "yield_curve_10y2y",
+        "valuation_proxy",
+        "fedwatch_probability",
+    )
+    financial_conditions = market_snapshot.get("financial_conditions", {})
+    if not isinstance(financial_conditions, dict):
+        financial_conditions = {}
+
+    summary = {
+        "generated_at": market_snapshot.get("generated_at"),
+        "items": [],
+    }
+    for key in configured_order:
+        item = financial_conditions.get(key)
+        summary["items"].append(_financial_condition_summary(key, item))
+    return summary
+
+
+def _financial_condition_summary(key: str, item: Any) -> dict:
+    if not isinstance(item, dict):
+        return {
+            "key": key,
+            "name": key,
+            "value": None,
+            "unit": None,
+            "observation_date": None,
+            "source": None,
+            "source_tier": None,
+            "freshness": "unknown",
+            "status": "missing",
+            "error": "Financial condition item missing.",
+            "interpretation_hint": None,
+            "risk_relevance": None,
+        }
+
+    data_quality = item.get("data_quality", {})
+    freshness = item.get("freshness")
+    if not freshness and isinstance(data_quality, dict):
+        freshness = data_quality.get("freshness_status")
+    return {
+        "key": item.get("key") or key,
+        "name": item.get("name") or key,
+        "value": item.get("value"),
+        "unit": item.get("unit"),
+        "observation_date": item.get("observation_date"),
+        "source": item.get("source"),
+        "source_tier": item.get("source_tier")
+        or (data_quality.get("source_tier") if isinstance(data_quality, dict) else None),
+        "freshness": freshness,
+        "status": item.get("status"),
+        "error": item.get("error"),
+        "interpretation_hint": item.get("interpretation_hint"),
+        "risk_relevance": item.get("risk_relevance"),
     }
 
 
@@ -330,7 +398,7 @@ def _build_data_limitations(
     elif freshness_status == "unknown":
         limitations.append("holdings snapshot freshness is unknown; account data should not be treated as real-time.")
 
-    for section in ("market_data", "macro_data", "fx_data"):
+    for section in ("market_data", "macro_data", "fx_data", "financial_conditions"):
         items = market_snapshot.get(section, {})
         if not isinstance(items, dict):
             continue
@@ -344,6 +412,10 @@ def _build_data_limitations(
                 elif section == "market_data" and key == "gold":
                     prefix = "optional gold"
                 limitations.append(f"{prefix} unavailable: {item.get('error')}")
+            elif section == "financial_conditions" and item.get("status") not in {"ok", "stale_cache"}:
+                limitations.append(
+                    f"financial_conditions.{key}: {item.get('status')} - {item.get('error')}"
+                )
 
             data_quality = item.get("data_quality", {})
             if (
@@ -448,7 +520,7 @@ def _build_rule_based_observations(
 def _extract_data_sources(market_snapshot: dict, market_temperature: dict) -> list[dict]:
     sources = []
 
-    for section in ("market_data", "macro_data", "fx_data"):
+    for section in ("market_data", "macro_data", "fx_data", "financial_conditions"):
         items = market_snapshot.get(section, {})
         if not isinstance(items, dict):
             continue
@@ -683,6 +755,49 @@ def _market_table(market_summary: dict) -> str:
             "Source tier",
             "Freshness",
             "Status",
+            "Error",
+        ],
+        rows,
+    )
+
+
+def _financial_conditions_table(financial_conditions: dict) -> str:
+    items = financial_conditions.get("items", []) if isinstance(financial_conditions, dict) else []
+    if not isinstance(items, list) or not items:
+        return "No financial conditions recorded."
+
+    rows = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        value = _format_number(item.get("value"))
+        unit = item.get("unit")
+        if item.get("value") is not None and unit:
+            value = f"{value} {unit}"
+        rows.append(
+            [
+                _display(item.get("key")),
+                _display(item.get("name")),
+                value,
+                _display(item.get("observation_date")),
+                _display(item.get("source")),
+                _display(item.get("freshness")),
+                _display(item.get("status")),
+                _display(item.get("interpretation_hint")),
+                _display(item.get("error")),
+            ]
+        )
+
+    return _markdown_table(
+        [
+            "Key",
+            "Name",
+            "Value",
+            "Observation date",
+            "Source",
+            "Freshness",
+            "Status",
+            "Interpretation hint",
             "Error",
         ],
         rows,

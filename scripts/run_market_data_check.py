@@ -11,6 +11,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from data_providers.market_data_service import (
+    FINANCIAL_CONDITION_KEYS,
     IMPORTANT_OPTIONAL_KEYS,
     OPTIONAL_MARKET_KEYS,
     REQUIRED_CORE_KEYS,
@@ -124,7 +125,7 @@ def _failed_optional_keys(snapshot: dict, keys: tuple[str, ...]) -> list[str]:
 
 
 def _find_data_item(snapshot: dict, key: str) -> dict | None:
-    for section in ("market_data", "macro_data", "fx_data"):
+    for section in ("market_data", "macro_data", "fx_data", "financial_conditions"):
         data = snapshot.get(section)
         if isinstance(data, dict) and isinstance(data.get(key), dict):
             return data[key]
@@ -143,7 +144,7 @@ def _mark_stale_cache(
     stale_snapshot["cached_at"] = cached_at
     stale_snapshot["live_required_core_errors"] = live_required_core_errors
 
-    for section in ("market_data", "macro_data", "fx_data"):
+    for section in ("market_data", "macro_data", "fx_data", "financial_conditions"):
         section_data = stale_snapshot.get(section)
         if isinstance(section_data, dict):
             stale_snapshot[section] = _mark_stale_section(section_data, cached_at)
@@ -151,13 +152,14 @@ def _mark_stale_cache(
     _overlay_live_items(
         stale_snapshot,
         live_snapshot,
-        (*IMPORTANT_OPTIONAL_KEYS, *OPTIONAL_MARKET_KEYS),
+        (*IMPORTANT_OPTIONAL_KEYS, *OPTIONAL_MARKET_KEYS, *FINANCIAL_CONDITION_KEYS),
     )
 
     stale_snapshot["diagnostics"] = {
         "required_core_status": _status_by_keys(live_snapshot, REQUIRED_CORE_KEYS),
         "important_optional_status": _status_by_keys(live_snapshot, IMPORTANT_OPTIONAL_KEYS),
         "optional_status": _status_by_keys(live_snapshot, OPTIONAL_MARKET_KEYS),
+        "financial_conditions_status": _status_by_keys(live_snapshot, FINANCIAL_CONDITION_KEYS),
         "used_cache": True,
     }
 
@@ -199,7 +201,7 @@ def _overlay_live_items(target_snapshot: dict, live_snapshot: dict, keys: tuple[
 
 
 def _find_data_item_with_section(snapshot: dict, key: str) -> tuple[str | None, dict | None]:
-    for section in ("market_data", "macro_data", "fx_data"):
+    for section in ("market_data", "macro_data", "fx_data", "financial_conditions"):
         data = snapshot.get(section)
         if isinstance(data, dict) and isinstance(data.get(key), dict):
             return section, data[key]
@@ -215,6 +217,7 @@ def _attach_diagnostics(
         "required_core_status": _status_by_keys(snapshot, REQUIRED_CORE_KEYS),
         "important_optional_status": _status_by_keys(snapshot, IMPORTANT_OPTIONAL_KEYS),
         "optional_status": _status_by_keys(snapshot, OPTIONAL_MARKET_KEYS),
+        "financial_conditions_status": _status_by_keys(snapshot, FINANCIAL_CONDITION_KEYS),
         "used_cache": used_cache,
     }
     if required_core_errors:
@@ -249,7 +252,7 @@ def _attach_data_quality(snapshot: dict) -> None:
         data_quality_config = {}
 
     generated_at = str(snapshot.get("generated_at") or "")
-    for section in ("market_data", "macro_data", "fx_data"):
+    for section in ("market_data", "macro_data", "fx_data", "financial_conditions"):
         section_data = snapshot.get(section)
         if not isinstance(section_data, dict):
             continue
@@ -258,6 +261,8 @@ def _attach_data_quality(snapshot: dict) -> None:
                 continue
             metadata = data_quality_config.get(key, {})
             item["data_quality"] = calculate_freshness(item, metadata, generated_at)
+            if section == "financial_conditions":
+                item["freshness"] = item["data_quality"].get("freshness_status") or item.get("freshness")
 
 
 if __name__ == "__main__":

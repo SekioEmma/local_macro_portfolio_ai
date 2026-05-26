@@ -33,6 +33,16 @@ MARKET_FACT_KEYS = (
     "usd_cny",
 )
 
+FINANCIAL_CONDITION_KEYS = (
+    "high_yield_spread",
+    "vix",
+    "real_yield_10y",
+    "breakeven_inflation_10y",
+    "yield_curve_10y2y",
+    "valuation_proxy",
+    "fedwatch_probability",
+)
+
 ALLOWED_MODEL_TASKS = [
     "Explain the current market state using provided facts.",
     "Explain portfolio exposure and allocation deviation.",
@@ -142,6 +152,7 @@ def build_llm_context_pack(
     macro_regime_history: dict,
 ) -> dict:
     confirmed_facts = _build_confirmed_facts(portfolio_snapshot, market_snapshot)
+    financial_conditions = _build_financial_conditions(market_snapshot)
     data_limitations = _build_data_limitations(
         portfolio_snapshot,
         market_snapshot,
@@ -163,6 +174,7 @@ def build_llm_context_pack(
             macro_regime_history,
         ),
         "confirmed_facts": confirmed_facts,
+        "financial_conditions": financial_conditions,
         "rule_based_assessments": _build_rule_based_assessments(
             market_temperature,
             macro_regime_history,
@@ -194,6 +206,7 @@ def build_llm_context_pack(
 def render_llm_context_markdown(context_pack: dict) -> str:
     facts = context_pack.get("confirmed_facts", {})
     portfolio = context_pack.get("portfolio_context", {})
+    financial_conditions = context_pack.get("financial_conditions", {})
     assessments = context_pack.get("rule_based_assessments", {})
     historical = context_pack.get("historical_context", {})
     data_quality = context_pack.get("data_quality", {})
@@ -215,6 +228,18 @@ def render_llm_context_markdown(context_pack: dict) -> str:
         "### Market Facts",
         "",
         _market_facts_table(facts.get("market", {})),
+        "",
+        "### Financial Conditions",
+        "",
+        _financial_conditions_table(financial_conditions),
+        "",
+        "Financial condition data limitations:",
+        "",
+        _bullet_list(financial_conditions.get("data_limitations", []), "No financial condition limitations recorded."),
+        "",
+        "Financial condition interpretation boundaries:",
+        "",
+        _bullet_list(financial_conditions.get("interpretation_boundaries", []), "No interpretation boundaries recorded."),
         "",
         "### Account Facts",
         "",
@@ -353,6 +378,81 @@ def _extract_market_fact(key: str, market_snapshot: dict) -> dict:
             "importance": data_quality.get("importance") if isinstance(data_quality, dict) else None,
         },
     }
+
+
+def _build_financial_conditions(market_snapshot: dict) -> dict:
+    items = [
+        _extract_financial_condition_item(key, market_snapshot)
+        for key in FINANCIAL_CONDITION_KEYS
+    ]
+    return {
+        "generated_at": market_snapshot.get("generated_at") or _utc_now(),
+        "items": items,
+        "data_limitations": _financial_condition_limitations(items),
+        "interpretation_boundaries": [
+            "Credit spread helps distinguish normal pullback from credit stress, but is not a standalone crisis signal.",
+            "VIX indicates volatility stress, not long-term return forecast.",
+            "Real yield affects growth equity and gold through discount-rate/opportunity-cost channels.",
+            "Missing valuation data must not be inferred by the model.",
+            "Missing FedWatch probability must not be inferred by the model.",
+        ],
+    }
+
+
+def _extract_financial_condition_item(key: str, market_snapshot: dict) -> dict:
+    financial_conditions = market_snapshot.get("financial_conditions", {})
+    item = financial_conditions.get(key) if isinstance(financial_conditions, dict) else None
+    if not isinstance(item, dict):
+        return {
+            "key": key,
+            "name": key,
+            "value": None,
+            "unit": None,
+            "observation_date": None,
+            "source": None,
+            "source_tier": None,
+            "freshness": "unknown",
+            "status": "missing",
+            "error": "Financial condition item missing.",
+            "interpretation_hint": None,
+            "risk_relevance": None,
+        }
+
+    data_quality = item.get("data_quality", {})
+    freshness = item.get("freshness")
+    if not freshness and isinstance(data_quality, dict):
+        freshness = data_quality.get("freshness_status")
+    return {
+        "key": item.get("key") or key,
+        "name": item.get("name") or key,
+        "value": item.get("value"),
+        "unit": item.get("unit"),
+        "observation_date": item.get("observation_date"),
+        "source": item.get("source"),
+        "source_tier": item.get("source_tier")
+        or (data_quality.get("source_tier") if isinstance(data_quality, dict) else None),
+        "freshness": freshness,
+        "status": item.get("status"),
+        "error": item.get("error"),
+        "interpretation_hint": item.get("interpretation_hint"),
+        "risk_relevance": item.get("risk_relevance"),
+    }
+
+
+def _financial_condition_limitations(items: list[dict]) -> list[str]:
+    limitations = []
+    for item in items:
+        key = item.get("key")
+        status = item.get("status")
+        if key == "valuation_proxy" and status != "ok":
+            limitations.append("valuation proxy not available from configured sources")
+        elif key == "fedwatch_probability" and status != "ok":
+            limitations.append("FedWatch not available from configured sources")
+        elif status not in {"ok", "stale_cache"}:
+            limitations.append(
+                f"{key} status={status}: {item.get('error') or 'not available'}"
+            )
+    return _dedupe_strings(limitations)
 
 
 def _build_rule_based_assessments(market_temperature: dict, macro_regime_history: dict) -> dict:
@@ -536,7 +636,7 @@ def _build_data_quality(
 
 def _extract_market_data_quality(market_snapshot: dict) -> dict:
     quality = {}
-    for section in ("market_data", "macro_data", "fx_data"):
+    for section in ("market_data", "macro_data", "fx_data", "financial_conditions"):
         items = market_snapshot.get(section, {})
         if not isinstance(items, dict):
             continue
@@ -597,7 +697,7 @@ def _build_data_limitations(
     if market_snapshot.get("diagnostics", {}).get("used_cache"):
         limitations.append("market_snapshot used stale cache.")
 
-    for section in ("market_data", "macro_data", "fx_data"):
+    for section in ("market_data", "macro_data", "fx_data", "financial_conditions"):
         items = market_snapshot.get(section, {})
         if not isinstance(items, dict):
             continue
@@ -693,6 +793,48 @@ def _market_facts_table(market_facts: dict) -> str:
         )
     return _markdown_table(
         ["Key", "Value", "Source", "ID/Symbol", "Observation date", "Status", "Source tier", "Freshness"],
+        rows,
+    )
+
+
+def _financial_conditions_table(financial_conditions: dict) -> str:
+    items = financial_conditions.get("items", []) if isinstance(financial_conditions, dict) else []
+    if not isinstance(items, list) or not items:
+        return "No financial conditions available."
+
+    rows = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        value = _format_number(item.get("value"))
+        unit = item.get("unit")
+        if item.get("value") is not None and unit:
+            value = f"{value} {unit}"
+        rows.append(
+            [
+                item.get("key"),
+                item.get("name"),
+                value,
+                item.get("observation_date"),
+                item.get("source"),
+                item.get("source_tier"),
+                item.get("freshness"),
+                item.get("status"),
+                item.get("interpretation_hint"),
+            ]
+        )
+    return _markdown_table(
+        [
+            "Key",
+            "Name",
+            "Value",
+            "Observation date",
+            "Source",
+            "Source tier",
+            "Freshness",
+            "Status",
+            "Interpretation hint",
+        ],
         rows,
     )
 

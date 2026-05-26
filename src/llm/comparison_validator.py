@@ -63,6 +63,9 @@ BROADER_BOUNDARY_MARKERS = [
     "无数据",
     "无相关数据",
     "缺少时间戳",
+    "not_available",
+    "不可用",
+    "无法得知",
     "不能补",
     "不能编造",
     "不编造",
@@ -72,11 +75,11 @@ BROADER_BOUNDARY_MARKERS = [
 
 def validate_comparison_answer(answer_text: str, validator_facts: dict[str, Any] | None = None) -> dict[str, Any]:
     facts = validator_facts if isinstance(validator_facts, dict) else {}
-    external = _external_source_mentions(answer_text)
+    external = _external_source_mentions(answer_text, facts)
     hard_flags = {
         "thinking_leak": _has_any_regex(answer_text, THINKING_PATTERNS),
         "external_source_mentioned": external["unsupported_mentions"],
-        "unsupported_market_data_claim": _unsupported_market_data_claims(answer_text),
+        "unsupported_market_data_claim": _unsupported_market_data_claims(answer_text, facts),
         "trade_like_instruction": _trade_like_instruction(answer_text),
         "cash_reserve_misuse": _cash_reserve_misuse(answer_text),
         "current_holdings_realtime_misstatement": _current_holdings_realtime_misstatement(answer_text),
@@ -97,12 +100,19 @@ def validate_comparison_answer(answer_text: str, validator_facts: dict[str, Any]
     }
 
 
-def _external_source_mentions(text: str) -> dict[str, list[str]]:
+def _external_source_mentions(text: str, facts: dict[str, Any]) -> dict[str, list[str]]:
     unsupported = []
     boundary = []
+    allowed_sources = {
+        str(source).lower()
+        for source in facts.get("allowed_external_sources", [])
+        if str(source).strip()
+    }
     for source in EXTERNAL_SOURCES:
         for sentence in _sentences(text):
             if not re.search(re.escape(source), sentence, re.IGNORECASE):
+                continue
+            if source.lower() in allowed_sources:
                 continue
             if _has_boundary_marker(sentence):
                 boundary.append(source)
@@ -116,7 +126,7 @@ def _external_source_mentions(text: str) -> dict[str, list[str]]:
     }
 
 
-def _unsupported_market_data_claims(text: str) -> list[str]:
+def _unsupported_market_data_claims(text: str, facts: dict[str, Any]) -> list[str]:
     patterns = [
         r"(?:PE|市盈率|估值倍数)[^\n。；]{0,24}\d+(?:\.\d+)?",
         r"(?:FedWatch|概率)[^\n。；]{0,24}\d+(?:\.\d+)?%",
@@ -131,8 +141,20 @@ def _unsupported_market_data_claims(text: str) -> list[str]:
         window = _surrounding_text(text, hit, 20)
         if _has_boundary_marker(window):
             continue
+        if _provided_market_data_claim(window, facts):
+            continue
         filtered.append(hit)
     return filtered
+
+
+def _provided_market_data_claim(text: str, facts: dict[str, Any]) -> bool:
+    terms = facts.get("provided_market_data_terms")
+    if not isinstance(terms, list):
+        return False
+    return any(
+        str(term).strip() and re.search(re.escape(str(term)), text, re.IGNORECASE)
+        for term in terms
+    )
 
 
 def _trade_like_instruction(text: str) -> bool:
