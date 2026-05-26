@@ -48,16 +48,19 @@ def build_deepseek_prompt_package(
             "不编造未提供的数据。",
             "不引用未提供的 Reuters / FactSet / Bloomberg / FRED / FedWatch / Goldman 等来源。",
             "不输出具体买入/卖出金额。",
-            "不说应买入、应卖出、清仓、等跌再买、立即调整。",
+            "不说应买入、应卖出、清仓、等跌再买、立即调整、暂停定投、停止定投、加速买入、增配或减配某资产。",
             "不把 current_holdings.csv 说成实时账户同步。",
             "不把 cash reserve / 余额宝当成待配置资产。",
             "不预测短期点位。",
             "必须区分事实、推断、假设、不确定性。",
         ],
-        "data_contract": (
-            "以下数据由本地系统提供。未出现在 data_package 中的数据视为未提供，"
-            "模型不能补编，也不能暗示已经查询外部实时数据。"
-        ),
+        "data_contract": {
+            "provided_data": "以下 data_package 由本地系统确定性提供。",
+            "missing_data": "未出现在 data_package 中的数据视为未提供，模型不能补编，也不能暗示已经查询外部实时数据。",
+            "allowed_inference_scope": "可以基于已提供事实、一般宏观机制和长期配置原则做条件化分析。",
+            "forbidden_inference": "不能把未提供的 PE、forward PE、CAPE、valuation percentile、FedWatch、Reuters、FactSet、Bloomberg、Goldman、credit spread、HYG spread、VIX、实时价格或机构观点写成事实。",
+            "output_requirements": "若用户问题提到缺失数据，必须明确说本地 context 未提供这些数据，因此不能确认该项；以下只能从一般机制和已有数据出发分析。",
+        },
         "data_package": facts["prompt_facts"],
         "user_question": {
             "style": answer_style,
@@ -71,7 +74,40 @@ def build_deepseek_prompt_package(
             "不机械复述所有字段。",
             "不写成模板报告。",
             "自然回应用户真正担忧。",
+            "对正常回调、危机、横盘消化、长期修复能力这类问题，要分层说明，而不是只给标签。",
         ],
+        "asset_role_non_absolutism": [
+            "short_bond 通常波动低于权益和长债，但不等于无风险，也可能受利率和流动性环境影响。",
+            "gold 有时有避险属性，但也可能受实际利率、美元和流动性影响承压。",
+            "bonds / gold / cash-like assets 不能被描述为必然对冲或必然受益。",
+            "equity / Nasdaq / AI 不能被描述为必然长期上涨，也不能在证据不足时断言已失去修复能力。",
+            "资产角色必须带条件、场景和不确定性。",
+            "如果说黄金或短债在压力场景中更稳，必须写明条件：利率、实际利率、美元、流动性和信用风险环境可能改变其表现。",
+            "不要写“更稳，甚至受益于避险流动”这类无条件判断；应改成“在部分风险情绪恶化场景中可能更稳，但并非必然受益”。",
+        ],
+        "dca_wording_rules": {
+            "avoid": [
+                "越跌越买",
+                "趁跌多买",
+                "加速买入",
+                "停止定投",
+                "暂停定投",
+                "调仓",
+                "降低权益",
+                "增配债券",
+                "60/40 等未经用户策略授权的新配置比例",
+                "行动建议",
+                "立即调整",
+                "不要使用“越跌越买”这类原话，即使只是解释或概括。",
+                "不要把原有定投计划解释成新的追加买入、加速买入或择时动作。",
+            ],
+            "preferred": [
+                "如果既有定投规则继续执行，低配资产会在后续现金流中逐步接近目标权重。",
+                "这是原有计划的执行效果，不是基于单次市场判断追加操作。",
+                "组合含义应落在观察方向、后续定投评估、阈值复核、年末复核和再平衡评估。",
+                "可以说“低配资产会在后续现金流中逐步接近目标权重”，但必须同时说明这是既有规则的机械执行效果。",
+            ],
+        },
         "output_style": [
             "中文。",
             "analyst_memo 风格。",
@@ -87,6 +123,7 @@ def build_deepseek_prompt_package(
             "是否误用了 cash reserve？",
             "是否把本地快照当实时账户？",
             "是否说反了高配/低配方向？",
+            "是否把持仓快照日期、市场观察日期或报告日期混在一起？",
             "只输出最终答案，不输出自检过程。",
         ],
     }
@@ -131,6 +168,24 @@ def _extract_facts(context_json: dict[str, Any], *, context_mode: str) -> dict[s
     market_temperature = _as_dict(assessments.get("market_temperature"))
     macro_regime = _as_dict(assessments.get("macro_current_regime"))
     regime_classification = _as_dict(macro_regime.get("regime_classification"))
+    generated_at = context_json.get("generated_at")
+    holdings_snapshot_date = portfolio.get("holdings_updated_at") or portfolio_facts.get("holdings_updated_at")
+    market_observation_dates = _market_source_timestamps(market_facts)
+    missing_data = [
+        "PE",
+        "forward PE",
+        "CAPE",
+        "valuation percentile",
+        "FedWatch probability",
+        "Reuters",
+        "FactSet",
+        "Bloomberg",
+        "Goldman",
+        "credit spread",
+        "HYG spread",
+        "VIX",
+        "real-time market prices",
+    ]
 
     portfolio_package: dict[str, Any] = {
         "target_allocation": target_allocation,
@@ -138,7 +193,7 @@ def _extract_facts(context_json: dict[str, Any], *, context_mode: str) -> dict[s
         "allocation_deviation_pp": deviation,
         "holdings_snapshot": {
             "source": "current_holdings.csv local manual snapshot",
-            "updated_at": portfolio.get("holdings_updated_at") or portfolio_facts.get("holdings_updated_at"),
+            "updated_at": holdings_snapshot_date,
             "age_days": portfolio.get("holdings_age_days") or portfolio_facts.get("holdings_age_days"),
             "freshness": portfolio.get("holdings_freshness_status")
             or portfolio_facts.get("holdings_freshness_status"),
@@ -180,7 +235,7 @@ def _extract_facts(context_json: dict[str, Any], *, context_mode: str) -> dict[s
         },
         "market_snapshot_status": data_quality.get("market_snapshot_status"),
         "used_cache": data_quality.get("used_cache"),
-        "source_timestamps": _market_source_timestamps(market_facts),
+        "source_timestamps": market_observation_dates,
         "missing_data_declaration": (
             "If PE, valuation multiples, real-time prices, FedWatch probabilities, or external analyst sources "
             "are not explicitly listed here, they are not provided."
@@ -191,6 +246,18 @@ def _extract_facts(context_json: dict[str, Any], *, context_mode: str) -> dict[s
 
     prompt_facts = {
         "context_mode": context_mode,
+        "report_metadata": {
+            "generated_at": generated_at,
+            "report_date_rule": (
+                "report_date can only come from generated_at or explicit report_metadata. "
+                "holdings_snapshot_date is only the holdings snapshot date. "
+                "market_data_observation_dates are only market data observation dates. "
+                "Do not invent today, this month, or latest close dates; if no explicit report_date exists, do not write a specific report date."
+            ),
+            "holdings_snapshot_date": holdings_snapshot_date,
+            "market_data_observation_dates": market_observation_dates,
+        },
+        "missing_data": missing_data,
         "portfolio_facts": portfolio_package,
         "market_facts": market_package,
     }
@@ -198,7 +265,7 @@ def _extract_facts(context_json: dict[str, Any], *, context_mode: str) -> dict[s
         "allocation_direction": direction,
         "target_allocation": target_allocation,
         "context_mode": context_mode,
-        "missing_data_terms": ["PE", "估值", "收益率点位", "黄金价格", "FedWatch"],
+        "missing_data_terms": missing_data + ["估值", "收益率点位", "黄金价格", "信用利差"],
     }
     return {"prompt_facts": prompt_facts, "validator_facts": validator_facts}
 

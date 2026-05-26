@@ -18,35 +18,102 @@ TRADE_LIKE_PATTERNS = [
     r"应(?:该)?卖出",
     r"建议买入",
     r"建议卖出",
+    r"需(?:要)?增加持仓",
+    r"需(?:要)?减持",
     r"清仓",
+    r"越跌越买",
     r"等跌再买",
     r"立即调整",
     r"暂停定投",
-    r"无需暂停",
-    r"继续定投",
+    r"停止定投",
+    r"加速买入",
+    r"增配(?:标普|纳指|纳斯达克|短债|债券|黄金|sp500|nasdaq|gold|bond)",
+    r"减配(?:标普|纳指|纳斯达克|短债|债券|黄金|sp500|nasdaq|gold|bond)",
+    r"调整为\s*\d+\s*/\s*\d+",
+]
+TRADE_NEGATION_MARKERS = [
+    "不建议",
+    "不能",
+    "不应",
+    "不是",
+    "无法",
+    "不要",
+    "并非",
+    "不把",
+    "不宜",
+    "不能据此",
 ]
 THINKING_PATTERNS = [r"<think>", r"</think>", r"Thinking", r"思考过程"]
+BROADER_BOUNDARY_MARKERS = [
+    "未提供",
+    "没有提供",
+    "没有直接提供",
+    "本地 context 未提供",
+    "本地上下文未提供",
+    "本地数据未提供",
+    "本地数据没有提供",
+    "本地数据不足",
+    "缺少",
+    "缺失",
+    "没有",
+    "无法确认",
+    "不能确认",
+    "不能判断",
+    "没有数据支持",
+    "无数据",
+    "无相关数据",
+    "缺少时间戳",
+    "不能补",
+    "不能编造",
+    "不编造",
+    "无法基于具体数值",
+]
 
 
 def validate_comparison_answer(answer_text: str, validator_facts: dict[str, Any] | None = None) -> dict[str, Any]:
     facts = validator_facts if isinstance(validator_facts, dict) else {}
-    flags = {
+    external = _external_source_mentions(answer_text)
+    hard_flags = {
         "thinking_leak": _has_any_regex(answer_text, THINKING_PATTERNS),
-        "external_source_mentioned": _mentioned_sources(answer_text),
+        "external_source_mentioned": external["unsupported_mentions"],
         "unsupported_market_data_claim": _unsupported_market_data_claims(answer_text),
-        "trade_like_instruction": _has_any_regex(answer_text, TRADE_LIKE_PATTERNS),
+        "trade_like_instruction": _trade_like_instruction(answer_text),
         "cash_reserve_misuse": _cash_reserve_misuse(answer_text),
         "current_holdings_realtime_misstatement": _current_holdings_realtime_misstatement(answer_text),
         "portfolio_direction_conflict": _portfolio_direction_conflicts(answer_text, facts),
         "missing_data_boundary_absent": _missing_data_boundary_absent(answer_text, facts),
+    }
+    soft_flags = {
         "too_template_like": _too_template_like(answer_text),
     }
-    flags["has_any_flag"] = any(bool(value) for key, value in flags.items() if key != "too_template_like")
-    return flags
+    return {
+        "hard_flags": hard_flags,
+        "soft_flags": soft_flags,
+        "boundary_statements": {
+            "external_source_boundary": external["boundary_mentions"],
+        },
+        "has_hard_flag": any(bool(value) for value in hard_flags.values()),
+        "has_soft_flag": any(bool(value) for value in soft_flags.values()),
+    }
 
 
-def _mentioned_sources(text: str) -> list[str]:
-    return [source for source in EXTERNAL_SOURCES if re.search(re.escape(source), text, re.IGNORECASE)]
+def _external_source_mentions(text: str) -> dict[str, list[str]]:
+    unsupported = []
+    boundary = []
+    for source in EXTERNAL_SOURCES:
+        for sentence in _sentences(text):
+            if not re.search(re.escape(source), sentence, re.IGNORECASE):
+                continue
+            if _has_boundary_marker(sentence):
+                boundary.append(source)
+            elif re.search(r"报道|数据显示|根据|引用|指出|称|预测|认为|数据", sentence):
+                unsupported.append(source)
+            else:
+                unsupported.append(source)
+    return {
+        "unsupported_mentions": sorted(set(unsupported)),
+        "boundary_mentions": sorted(set(boundary)),
+    }
 
 
 def _unsupported_market_data_claims(text: str) -> list[str]:
@@ -62,10 +129,20 @@ def _unsupported_market_data_claims(text: str) -> list[str]:
     filtered = []
     for hit in hits:
         window = _surrounding_text(text, hit, 20)
-        if any(word in window for word in ["未提供", "没有提供", "不能补", "无法基于", "不编造"]):
+        if _has_boundary_marker(window):
             continue
         filtered.append(hit)
     return filtered
+
+
+def _trade_like_instruction(text: str) -> bool:
+    for sentence in _sentences(text):
+        if not _has_any_regex(sentence, TRADE_LIKE_PATTERNS):
+            continue
+        if _is_negated_trade_sentence(sentence):
+            continue
+        return True
+    return False
 
 
 def _cash_reserve_misuse(text: str) -> bool:
@@ -97,46 +174,64 @@ def _portfolio_direction_conflicts(text: str, facts: dict[str, Any]) -> list[dic
     if not isinstance(direction, dict):
         return []
     names = {
-        "sp500": ["sp500", "标普"],
-        "nasdaq100": ["nasdaq100", "纳指", "纳斯达克"],
-        "short_bond": ["short_bond", "短债", "债券"],
+        "sp500": ["sp500", "标普", "标普500", "S&P 500"],
+        "nasdaq100": ["nasdaq100", "纳指", "纳斯达克", "Nasdaq 100"],
+        "short_bond": ["short_bond", "短债", "短期债", "short bond"],
         "gold": ["gold", "黄金"],
     }
+    high_terms = r"高配|overweight|高于目标|相对目标偏高|偏高"
+    low_terms = r"低配|underweight|低于目标|相对目标偏低|偏低"
     conflicts = []
     for asset, expected in direction.items():
         expected_text = str(expected)
         labels = names.get(asset, [asset])
-        conflict_windows = []
-        for label in labels:
-            near_high = (
-                rf"{re.escape(label)}[^\n。；,，]{{0,24}}(?:高配|overweight|高于目标|相对目标偏高)"
-                rf"|(?:高配|overweight|高于目标|相对目标偏高)[^\n。；,，]{{0,24}}{re.escape(label)}"
-            )
-            near_low = (
-                rf"{re.escape(label)}[^\n。；,，]{{0,24}}(?:低配|underweight|低于目标|相对目标偏低)"
-                rf"|(?:低配|underweight|低于目标|相对目标偏低)[^\n。；,，]{{0,24}}{re.escape(label)}"
-            )
-            if expected_text == "underweight":
-                conflict_windows.extend(match.group(0) for match in re.finditer(near_high, text, re.IGNORECASE))
-            if expected_text == "overweight":
-                conflict_windows.extend(match.group(0) for match in re.finditer(near_low, text, re.IGNORECASE))
-        joined = "\n".join(conflict_windows)
-        if expected_text == "underweight" and joined:
-            conflicts.append({"asset": asset, "expected": expected_text, "observed": "overweight wording"})
-        if expected_text == "overweight" and joined:
-            conflicts.append({"asset": asset, "expected": expected_text, "observed": "underweight wording"})
+        asset_clauses = [
+            clause
+            for clause in _clauses(text)
+            if any(re.search(re.escape(label), clause, re.IGNORECASE) for label in labels)
+        ]
+        for clause in asset_clauses:
+            has_high = bool(re.search(high_terms, clause, re.IGNORECASE))
+            has_low = bool(re.search(low_terms, clause, re.IGNORECASE))
+            if has_high and has_low:
+                continue
+            if expected_text == "underweight" and has_high:
+                conflicts.append({"asset": asset, "expected": expected_text, "observed": clause[:120]})
+                break
+            if expected_text == "overweight" and has_low:
+                conflicts.append({"asset": asset, "expected": expected_text, "observed": clause[:120]})
+                break
     return conflicts
 
 
 def _missing_data_boundary_absent(text: str, facts: dict[str, Any]) -> bool:
     terms = facts.get("missing_data_terms")
     if not isinstance(terms, list):
-        terms = ["PE", "估值", "收益率", "黄金价格", "FedWatch"]
-    mentions_sensitive_terms = any(str(term) in text for term in terms)
-    if not mentions_sensitive_terms:
+        terms = ["PE", "forward PE", "CAPE", "估值", "FedWatch", "信用利差", "VIX", "Reuters", "FactSet", "Bloomberg"]
+    relevant_sentences = []
+    for sentence in _sentences(text):
+        if any(str(term) and re.search(re.escape(str(term)), sentence, re.IGNORECASE) for term in terms):
+            relevant_sentences.append(sentence)
+    if not relevant_sentences:
         return False
-    boundary_terms = ["未提供", "本地 context", "本地上下文", "本地数据不足", "不能补编", "不能编造", "无法基于具体数值"]
-    return not any(term in text for term in boundary_terms)
+    if any(_has_boundary_marker(sentence) for sentence in relevant_sentences):
+        return False
+    combined = "。".join(relevant_sentences)
+    if _has_boundary_marker(combined):
+        return False
+    factual_assertion_patterns = [
+        r"\d+(?:\.\d+)?%?",
+        r"处于(?:历史)?(?:高位|低位)",
+        r"显示",
+        r"表明",
+        r"根据",
+        r"报道",
+        r"数据显示",
+    ]
+    for sentence in relevant_sentences:
+        if _has_any_regex(sentence, factual_assertion_patterns):
+            return True
+    return False
 
 
 def _too_template_like(text: str) -> bool:
@@ -158,3 +253,19 @@ def _surrounding_text(text: str, needle: str, radius: int) -> str:
 
 def _sentences(text: str) -> list[str]:
     return [item.strip() for item in re.split(r"[\n。；;]+", text) if item.strip()]
+
+
+def _clauses(text: str) -> list[str]:
+    return [item.strip() for item in re.split(r"[\n。；;，,、]+", text) if item.strip()]
+
+
+def _has_boundary_marker(text: str) -> bool:
+    return any(marker in text for marker in BROADER_BOUNDARY_MARKERS)
+
+
+def _is_negated_trade_sentence(sentence: str) -> bool:
+    if "越跌越买" in sentence:
+        return False
+    if any(marker in sentence for marker in TRADE_NEGATION_MARKERS):
+        return True
+    return bool(re.search(r"不是[^\n。；]{0,20}(?:交易|操作|指令|建议)", sentence))
