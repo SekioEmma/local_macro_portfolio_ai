@@ -13,8 +13,8 @@ local_llm:
   timeout_seconds: 240
   temperature: 0.1
   top_p: 0.9
-  num_ctx: 2048
-  max_context_chars: 5000
+  num_ctx: 4096
+  max_context_chars: 8000
   compact_prompt: true
   save_answer_archive: true
   strip_thinking_output: true
