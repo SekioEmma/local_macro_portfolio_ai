@@ -84,6 +84,10 @@ BROADER_BOUNDARY_MARKERS = [
     "不能编造",
     "不编造",
     "无法基于具体数值",
+    "未被提供",
+    "不可用",
+    "未提供",
+    "不包含",
 ]
 
 
@@ -102,6 +106,12 @@ def validate_comparison_answer(answer_text: str, validator_facts: dict[str, Any]
     }
     soft_flags = {
         "too_template_like": _too_template_like(answer_text),
+        "evidence_table_absent": _evidence_table_absent(answer_text),
+        "hypothesis_written_as_confirmed_fact": _hypothesis_written_as_confirmed_fact(answer_text),
+        "deterministic_short_bond_loss": _deterministic_short_bond_loss(answer_text),
+        "real_yield_gold_logic_too_linear": _real_yield_gold_logic_too_linear(answer_text),
+        "current_vs_target_allocation_confusion": _current_vs_target_allocation_confusion(answer_text, facts),
+        "stale_data_used_as_current": _stale_data_used_as_current(answer_text, facts),
     }
     return {
         "hard_flags": hard_flags,
@@ -164,19 +174,33 @@ def _unsupported_market_data_claims(text: str, facts: dict[str, Any]) -> list[st
             re.IGNORECASE,
         )
     )
+    hits.extend(
+        match.group(0)
+        for match in re.finditer(
+            r"(?:10\s*年期|30\s*年期|10Y|30Y)[^\n。；]{0,60}(?:收益率|名义国债收益率|日度收益率|站上|高于|距离|为|在|已经)[^\n。；]{0,36}\d+(?:\.\d+)?\s*(?:%|个百分点)?",
+            text,
+            re.IGNORECASE,
+        )
+    )
     filtered = []
     for hit in hits:
-        window = _surrounding_text(text, hit, 20)
+        sentence = _sentence_containing(text, hit)
+        window = _surrounding_text(text, hit, 100)
         if _claim_has_boundary_context(text, hit):
             continue
         if _has_boundary_marker(window):
             continue
         if _is_observation_date_reference(window):
             continue
+        if _context_backed_dgs_claim(sentence or window, facts):
+            continue
+        if sentence and _provided_market_data_claim(sentence, facts):
+            continue
         if _provided_market_data_claim(window, facts):
             continue
         filtered.append(hit)
-    return filtered
+    filtered.extend(_unsupported_unprovided_phrase_claims(text, facts))
+    return sorted(set(filtered))
 
 
 def _claim_has_boundary_context(text: str, hit: str) -> bool:
@@ -198,6 +222,8 @@ def _provided_market_data_claim(text: str, facts: dict[str, Any]) -> bool:
     terms = facts.get("provided_market_data_terms")
     if not isinstance(terms, list):
         return False
+    if _looks_like_dgs_value_claim(text):
+        return _context_backed_dgs_claim(text, facts)
     if _provided_rates_inflation_oil_claim(text, terms):
         return True
     if any(
@@ -229,6 +255,8 @@ def _is_observation_date_reference(text: str) -> bool:
 def _provided_rates_inflation_oil_claim(text: str, terms: list[Any]) -> bool:
     normalized_text = re.sub(r"\s+", "", text)
     normalized_terms = {re.sub(r"\s+", "", str(term)).lower() for term in terms}
+    if _looks_like_dgs_value_claim(text):
+        return False
     if normalized_terms.intersection(
         {
             "dgs2",
@@ -256,6 +284,140 @@ def _provided_rates_inflation_oil_claim(text: str, terms: list[Any]) -> bool:
     ):
         return True
     return False
+
+
+def _looks_like_dgs_value_claim(text: str) -> bool:
+    if re.search(r"(?:实际收益率|实际利率|real\s*yield)", text, re.IGNORECASE):
+        return False
+    if re.search(r"(?:10Y\s*-\s*2Y|10Y-2Y|10年\s*-\s*2年|收益率曲线|利差)", text, re.IGNORECASE):
+        return False
+    return bool(
+        re.search(
+            r"(?:DGS10|DGS30|10\s*年期|30\s*年期|10Y|30Y)[^\n。；]{0,60}\d+(?:\.\d+)?\s*(?:%|个百分点)?",
+            text,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _context_backed_dgs_claim(text: str, facts: dict[str, Any]) -> bool:
+    if not _looks_like_dgs_value_claim(text):
+        return False
+    if re.search(r"(?:盘中|intraday)[^\n。；]{0,30}\d+(?:\.\d+)?\s*%", text, re.IGNORECASE):
+        return False
+
+    values = facts.get("provided_market_data_values")
+    if not isinstance(values, dict):
+        return False
+
+    checks = []
+    if re.search(r"(?:DGS10|10\s*年期|10Y)", text, re.IGNORECASE):
+        checks.append(("nominal_yield_10y", "dgs10_distance_to_5pct"))
+    if re.search(r"(?:DGS30|30\s*年期|30Y)", text, re.IGNORECASE):
+        checks.append(("nominal_yield_30y", "dgs30_distance_to_5pct"))
+    if not checks:
+        return False
+
+    return all(
+        _dgs_text_matches_context(_dgs_relevant_text(text, value_key), values, value_key, distance_key)
+        for value_key, distance_key in checks
+    )
+
+
+def _dgs_relevant_text(text: str, value_key: str) -> str:
+    if value_key == "nominal_yield_10y":
+        match = re.search(r"(?:DGS10|10\s*年期|10Y)[^\n。；]{0,80}", text, re.IGNORECASE)
+        if not match:
+            return text
+        segment = match.group(0)
+        return re.split(r"(?:而|；|;)?\s*(?:DGS30|30\s*年期|30Y)", segment, maxsplit=1, flags=re.IGNORECASE)[0]
+    if value_key == "nominal_yield_30y":
+        match = re.search(r"(?:DGS30|30\s*年期|30Y)[^\n。；]{0,80}", text, re.IGNORECASE)
+        if match:
+            return match.group(0)
+    return text
+
+
+def _dgs_text_matches_context(
+    text: str,
+    values: dict[str, Any],
+    value_key: str,
+    distance_key: str,
+) -> bool:
+    item = values.get(value_key)
+    if not isinstance(item, dict):
+        return False
+    value = _float_or_none(item.get("value"))
+    if value is None:
+        return False
+
+    numbers = _numbers_in_text(text)
+    if not numbers:
+        return False
+
+    above_5_claim = bool(re.search(r"(?:站上|超过|高于|突破|above)[^\n。；]{0,12}5\s*%", text, re.IGNORECASE))
+    if above_5_claim:
+        return value >= 4.995
+    below_5_claim = bool(re.search(r"(?:未触及|未站上|没有站上|低于|below)[^\n。；]{0,12}5\s*%", text, re.IGNORECASE))
+    if below_5_claim:
+        return value < 5.005
+
+    for number in numbers:
+        if _close_enough(number, value, tolerance=0.015):
+            return True
+
+    distance_item = values.get(distance_key)
+    distance = _float_or_none(distance_item.get("value")) if isinstance(distance_item, dict) else None
+    if distance is not None and re.search(r"(?:距离|高于|低于|above|below)[^\n。；]{0,24}5\s*%", text, re.IGNORECASE):
+        return any(_close_enough(number, abs(distance), tolerance=0.025) for number in numbers)
+    if distance is not None and re.search(r"(?:距|距离|高于|低于)[^\n。；]{0,24}5\s*%?[^\n。；]{0,24}基点", text, re.IGNORECASE):
+        return any(_close_enough(number, abs(distance) * 100, tolerance=1.5) for number in numbers)
+    return False
+
+
+def _unsupported_unprovided_phrase_claims(text: str, facts: dict[str, Any]) -> list[str]:
+    unsupported = []
+    values = facts.get("provided_market_data_values")
+    if not isinstance(values, dict):
+        values = {}
+    for sentence in _sentences(text):
+        if _has_boundary_marker(sentence):
+            continue
+        if re.search(r"(?:CPI|PPI)[^\n。；]{0,20}(?:超预期|surprise|consensus|expected)", sentence, re.IGNORECASE):
+            unsupported.append(sentence[:120])
+            continue
+        if re.search(r"(?:final demand PPI|PPI final demand|最终需求PPI|最终需求 PPI)", sentence, re.IGNORECASE):
+            if re.search(r"(?:非|不是|不等于|并非|not)[^\n。；]{0,16}(?:final demand PPI|PPI final demand|最终需求PPI|最终需求 PPI)", sentence, re.IGNORECASE):
+                continue
+            item = values.get("ppi_final_demand")
+            if not isinstance(item, dict) or item.get("status") != "ok" or item.get("value") is None:
+                unsupported.append(sentence[:120])
+            continue
+        if re.search(r"(?:盘中|intraday)[^\n。；]{0,30}(?:最高|高点|high|为|达到|站上)[^\n。；]{0,20}\d+(?:\.\d+)?\s*%", sentence, re.IGNORECASE):
+            unsupported.append(sentence[:120])
+    return unsupported
+
+
+def _float_or_none(value: Any) -> float | None:
+    try:
+        if isinstance(value, bool) or value is None:
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _numbers_in_text(text: str) -> list[float]:
+    numbers = []
+    for match in re.finditer(r"\d+(?:\.\d+)?", text):
+        value = _float_or_none(match.group(0))
+        if value is not None:
+            numbers.append(value)
+    return numbers
+
+
+def _close_enough(left: float, right: float, *, tolerance: float) -> bool:
+    return abs(left - right) <= tolerance
 
 
 def _trade_like_instruction(text: str) -> bool:
@@ -449,6 +611,82 @@ def _too_template_like(text: str) -> bool:
     return headings >= 8 or bullets >= 20
 
 
+def _evidence_table_absent(text: str) -> bool:
+    if re.search(r"数据证据表|证据表|指标\s*\|\s*数值|指标\s+数值", text):
+        return False
+    return not (
+        re.search(r"observation_date|source|freshness|status", text, re.IGNORECASE)
+        and re.search(r"DGS10|DGS30|CPI|PCE|PPI|WTI|Brent|VIX|high_yield", text, re.IGNORECASE)
+    )
+
+
+def _hypothesis_written_as_confirmed_fact(text: str) -> bool:
+    for sentence in _sentences(text):
+        if _has_boundary_marker(sentence):
+            continue
+        if re.search(r"(?:当前|现在|本地数据|数据包)[^\n。；]{0,24}(?:CPI|PPI)[^\n。；]{0,24}(?:没有明显降温|未明显降温|没有降温|未降温)", sentence, re.IGNORECASE):
+            return True
+    return False
+
+
+def _deterministic_short_bond_loss(text: str) -> bool:
+    for sentence in _sentences(text):
+        if not re.search(r"(?:短债|short_bond|short bond)", sentence, re.IGNORECASE):
+            continue
+        if re.search(r"(?:并非|并不|不是|不等于|不能|不应|非)[^\n。；]{0,12}(?:确定回撤|必然回撤|稳赚|无风险|免疫利率风险)", sentence, re.IGNORECASE):
+            continue
+        if re.search(
+            r"(?:短债|short_bond|short bond)[^\n。；]{0,30}(?:确定回撤|必然回撤|稳赚|无风险|免疫利率风险)",
+            sentence,
+            re.IGNORECASE,
+        ):
+            return True
+    return False
+
+
+def _real_yield_gold_logic_too_linear(text: str) -> bool:
+    linear_patterns = [
+        r"油价上涨[^\n。；]{0,20}(?:直接|必然)[^\n。；]{0,20}实际利率",
+        r"通胀预期上升[^\n。；]{0,20}必然[^\n。；]{0,20}黄金(?:上涨|下跌|承压|受益)",
+        r"盈亏平衡通胀率上升[^\n。；]{0,12}(?:等于|就是|意味着)[^\n。；]{0,12}实际利率上升",
+    ]
+    return _has_any_regex(text, linear_patterns)
+
+
+def _current_vs_target_allocation_confusion(text: str, facts: dict[str, Any]) -> bool:
+    direction = facts.get("allocation_direction")
+    if not isinstance(direction, dict):
+        return False
+    equity_underweight = direction.get("sp500") == "underweight" and direction.get("nasdaq100") == "underweight"
+    if not equity_underweight:
+        return False
+    for sentence in _sentences(text):
+        if _has_boundary_marker(sentence):
+            continue
+        if not re.search(r"(?:当前|本地快照|持仓快照|现在)", sentence, re.IGNORECASE):
+            continue
+        if re.search(r"(?:权益|标普|纳指|sp500|nasdaq)[^\n。；]{0,8}(?:低配|underweight)", sentence, re.IGNORECASE):
+            continue
+        equity_high = re.search(
+            r"(?:(?:当前|本地快照|持仓快照|现在)[^\n。；]{0,8}(?:权益|标普|纳指|sp500|nasdaq)[^\n。；]{0,8}(?:高配|超配|overweight)|(?:当前|本地快照|持仓快照|现在)[^\n。；]{0,8}(?:高配|超配|overweight)[^\n。；]{0,8}(?:权益|标普|纳指|sp500|nasdaq))",
+            sentence,
+            re.IGNORECASE,
+        )
+        if equity_high:
+            return True
+    return False
+
+
+def _stale_data_used_as_current(text: str, facts: dict[str, Any]) -> bool:
+    values = facts.get("provided_market_data_values")
+    if not isinstance(values, dict):
+        return False
+    has_stale = any(isinstance(item, dict) and item.get("freshness") == "stale" for item in values.values())
+    if not has_stale:
+        return False
+    return bool(re.search(r"(?:实时|当前最新|today|right now)", text, re.IGNORECASE))
+
+
 def _has_any_regex(text: str, patterns: list[str]) -> bool:
     return any(re.search(pattern, text, re.IGNORECASE) for pattern in patterns)
 
@@ -458,6 +696,13 @@ def _surrounding_text(text: str, needle: str, radius: int) -> str:
     if index < 0:
         return needle
     return text[max(0, index - radius) : min(len(text), index + len(needle) + radius)]
+
+
+def _sentence_containing(text: str, needle: str) -> str:
+    for sentence in _sentences(text):
+        if needle in sentence:
+            return sentence
+    return ""
 
 
 def _sentences(text: str) -> list[str]:

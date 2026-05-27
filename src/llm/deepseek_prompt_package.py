@@ -68,16 +68,24 @@ def build_deepseek_prompt_package(
             "question": question,
         },
         "reasoning_requirements": [
+            "在 analyst_memo 正文前，先输出一个简短的“数据证据表”。",
+            "数据证据表必须包含列：指标、数值、单位、observation_date、source、freshness/status、用途/解释。",
+            "数据证据表只列本题实际使用的关键数据，不要机械列出所有字段；如果某项数据 stale，必须在表格或 data limitations 中标注，不得写成实时当前值。",
             "先给核心结论。",
             "然后给推理链条。",
             "必要时分情景。",
             "说明组合含义时使用相对风险暴露、观察方向、后续定投评估、阈值复核、年末复核、再平衡评估。",
             "不机械复述所有字段。",
             "不写成模板报告。",
-            "不要用表格，不要用 checklist；用自然段 analyst memo，最多 3 个小标题。",
+            "除正文前的数据证据表外，不要再用表格，不要用 checklist；正文用自然段 analyst memo，最多 3 个小标题。",
             "自然回应用户真正担忧。",
             "对正常回调、危机、横盘消化、长期修复能力这类问题，要分层说明，而不是只给标签。",
             "如果 financial_conditions 提供数据，必须在市场判断中引用至少部分 observation_date、source、freshness 或“基于本地 context 提供的最新观察日期”。",
+        ],
+        "conditional_reasoning_rules": [
+            "当用户问题包含“如果 / 假设 / 要是 / 若 / 在……情况下”等条件句时，必须区分三层：假设情景成立时的机制、当前数据包中哪些指标支持或不支持该情景、当前数据包缺少哪些数据而不能确认什么。",
+            "不得把用户提出的假设情景直接写成已经确认的当前事实。",
+            "例如用户问“如果 CPI/PPI 没有明显降温，同时油价上涨”，只能说在该假设成立时更像通胀型冲击；当前数据包可用 oil、breakeven、DGS、real yield 观察传导，但 CPI/PPI 是否明显降温需要同比/环比或趋势数据，不能仅凭 index level 确认。",
         ],
         "financial_conditions_rules": [
             "可以基于 high_yield_spread、vix、real_yield_10y、breakeven_inflation_10y、yield_curve_10y2y 讨论正常回调、信用压力、横盘消化和系统性危机边界。",
@@ -93,6 +101,10 @@ def build_deepseek_prompt_package(
             "可以讨论 CPI/PCE/PPI，但不能说超预期，除非 context 中提供 consensus / expected data。",
             "可以讨论 WTI/Brent 对通胀和利率的潜在传导，但不能机械等同于通胀失控。",
             "可以讨论油价、通胀、利率对标普、纳指、黄金、短债的条件化影响。",
+            "涉及名义收益率、实际利率、通胀预期和黄金时，必须使用关系：名义收益率 ≈ 实际利率 + 通胀预期 + 期限溢价。",
+            "不得写油价上涨会直接推升实际利率；不得写通胀预期上升必然导致黄金上涨或必然导致黄金下跌；不得把盈亏平衡通胀率上升等同于实际利率上升。",
+            "应写：如果名义收益率上升快于通胀预期，实际利率上升，黄金可能承压；如果通胀预期上升快于名义收益率，实际利率可能下降，黄金可能获得支撑。",
+            "黄金受实际利率、美元、通胀预期、信用压力和流动性共同影响，不能单因果判断。",
             "不能编造 FedWatch 概率。",
             "不能编造 PE、forward PE、CAPE、FactSet、Bloomberg、Reuters。",
             "不能在缺失广度和集中度数据时确认 AI/巨头集中度恶化。",
@@ -102,11 +114,19 @@ def build_deepseek_prompt_package(
         "asset_role_non_absolutism": [
             "short_bond 通常波动低于权益和长债，但不等于无风险，也可能受利率和流动性环境影响。",
             "gold 有时有避险属性，但也可能受实际利率、美元和流动性影响承压。",
+            "涉及短债时，不得写确定回撤、必然回撤、稳赚、无风险、免疫利率风险。",
+            "短债也可能受利率上行影响，但因久期较短，价格敏感度通常低于长债和权益；实际表现取决于票息、久期、基金持仓和利率路径。",
             "bonds / gold / cash-like assets 不能被描述为必然对冲或必然受益。",
             "equity / Nasdaq / AI 不能被描述为必然长期上涨，也不能在证据不足时断言已失去修复能力。",
             "资产角色必须带条件、场景和不确定性。",
             "如果说黄金或短债在压力场景中更稳，必须写明条件：利率、实际利率、美元、流动性和信用风险环境可能改变其表现。",
             "不要写“更稳，甚至受益于避险流动”这类无条件判断；应改成“在部分风险情绪恶化场景中可能更稳，但并非必然受益”。",
+        ],
+        "snapshot_vs_target_rules": [
+            "组合表述必须区分长期目标配置和当前本地持仓快照。",
+            "不得把长期目标中的权益权重写成当前权益高配。",
+            "如果说权益是组合收益主引擎，必须明确这是长期目标配置逻辑，不等于当前快照高配。",
+            "如果说当前组合方向，必须使用本地快照方向：sp500 当前相对目标低配、nasdaq100 当前相对目标低配、short_bond 当前相对目标高配、gold 当前相对目标高配。",
         ],
         "dca_wording_rules": {
             "avoid": [
@@ -138,6 +158,7 @@ def build_deepseek_prompt_package(
             "逻辑清晰，段落自然。",
             "不要机械列 checklist。",
             "少用项目符号；除非必须，不使用编号清单或 Markdown 表格。",
+            "唯一例外是正文前的数据证据表；该表要短，只列本题实际用到的关键数据。",
             "不要为了安全反复重复免责声明。",
             "不要输出交易指令。",
         ],
@@ -287,6 +308,7 @@ def _extract_facts(context_json: dict[str, Any], *, context_mode: str) -> dict[s
         "missing_data_terms": missing_data + _missing_data_terms_cn(financial_conditions, market_data_package),
         "allowed_external_sources": _data_package_sources(financial_conditions, market_data_package),
         "provided_market_data_terms": _provided_market_data_terms(financial_conditions, market_data_package),
+        "provided_market_data_values": _provided_market_data_values(financial_conditions, market_data_package),
     }
     return {"prompt_facts": prompt_facts, "validator_facts": validator_facts}
 
@@ -599,6 +621,51 @@ def _provided_market_data_terms(
     if package_available.get("brent_oil_30d_change"):
         terms.extend(["brent_oil_30d_change", "oil_30d_change", "30d oil change"])
     return _dedupe_strings(terms)
+
+
+def _provided_market_data_values(
+    financial_conditions: dict[str, Any],
+    market_data_package: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    values: dict[str, dict[str, Any]] = {}
+    items = financial_conditions.get("items")
+    if isinstance(items, list):
+        for item in items:
+            if not _item_is_provided_market_data(item):
+                continue
+            key = str(item.get("key") or "")
+            if key:
+                values[key] = _market_data_value_record(item)
+
+    for group_name in (
+        "treasury_yields",
+        "inflation_indicators",
+        "oil_and_energy",
+        "existing_financial_conditions",
+    ):
+        group = market_data_package.get(group_name)
+        if not isinstance(group, dict):
+            continue
+        for key, item in group.items():
+            if _item_is_provided_market_data(item):
+                values[str(key)] = _market_data_value_record(item)
+    return values
+
+
+def _market_data_value_record(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "value": item.get("value"),
+        "unit": item.get("unit"),
+        "source": item.get("source"),
+        "observation_date": item.get("observation_date"),
+        "freshness": item.get("freshness"),
+        "status": item.get("status"),
+        "error": item.get("error"),
+        "high_date": item.get("high_date"),
+        "window_days": item.get("window_days"),
+        "derived_from": item.get("derived_from"),
+        "calculation": item.get("calculation"),
+    }
 
 
 def _package_statuses(market_data_package: dict[str, Any]) -> dict[str, str]:
