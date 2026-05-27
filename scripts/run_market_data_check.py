@@ -129,6 +129,18 @@ def _find_data_item(snapshot: dict, key: str) -> dict | None:
         data = snapshot.get(section)
         if isinstance(data, dict) and isinstance(data.get(key), dict):
             return data[key]
+    package = snapshot.get("market_data_package")
+    if isinstance(package, dict):
+        for group_name in (
+            "treasury_yields",
+            "inflation_indicators",
+            "oil_and_energy",
+            "existing_financial_conditions",
+            "unavailable_or_research_needed",
+        ):
+            group = package.get(group_name)
+            if isinstance(group, dict) and isinstance(group.get(key), dict):
+                return group[key]
     return None
 
 
@@ -154,6 +166,8 @@ def _mark_stale_cache(
         live_snapshot,
         (*IMPORTANT_OPTIONAL_KEYS, *OPTIONAL_MARKET_KEYS, *FINANCIAL_CONDITION_KEYS),
     )
+    if isinstance(live_snapshot.get("market_data_package"), dict):
+        stale_snapshot["market_data_package"] = live_snapshot["market_data_package"]
 
     stale_snapshot["diagnostics"] = {
         "required_core_status": _status_by_keys(live_snapshot, REQUIRED_CORE_KEYS),
@@ -205,6 +219,18 @@ def _find_data_item_with_section(snapshot: dict, key: str) -> tuple[str | None, 
         data = snapshot.get(section)
         if isinstance(data, dict) and isinstance(data.get(key), dict):
             return section, data[key]
+    package = snapshot.get("market_data_package")
+    if isinstance(package, dict):
+        for group_name in (
+            "treasury_yields",
+            "inflation_indicators",
+            "oil_and_energy",
+            "existing_financial_conditions",
+            "unavailable_or_research_needed",
+        ):
+            group = package.get(group_name)
+            if isinstance(group, dict) and isinstance(group.get(key), dict):
+                return f"market_data_package.{group_name}", group[key]
     return None, None
 
 
@@ -263,6 +289,25 @@ def _attach_data_quality(snapshot: dict) -> None:
             item["data_quality"] = calculate_freshness(item, metadata, generated_at)
             if section == "financial_conditions":
                 item["freshness"] = item["data_quality"].get("freshness_status") or item.get("freshness")
+
+    package = snapshot.get("market_data_package")
+    if not isinstance(package, dict):
+        return
+    for group_name in (
+        "treasury_yields",
+        "inflation_indicators",
+        "oil_and_energy",
+        "existing_financial_conditions",
+        "unavailable_or_research_needed",
+    ):
+        group = package.get(group_name)
+        if not isinstance(group, dict):
+            continue
+        for key, item in group.items():
+            if not isinstance(item, dict):
+                continue
+            metadata = data_quality_config.get(key, {})
+            item["data_quality"] = calculate_freshness(item, metadata, generated_at)
 
 
 if __name__ == "__main__":

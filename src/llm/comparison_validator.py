@@ -69,6 +69,15 @@ BROADER_BOUNDARY_MARKERS = [
     "无相关数据",
     "缺少时间戳",
     "not_available",
+    "not available",
+    "not intraday",
+    "无法验证",
+    "无法得到确认",
+    "未能成功获取",
+    "未经核实",
+    "不能验证",
+    "不能确认",
+    "而非",
     "不可用",
     "无法得知",
     "不能补",
@@ -117,6 +126,12 @@ def _external_source_mentions(text: str, facts: dict[str, Any]) -> dict[str, lis
         for sentence in _sentences(text):
             if not re.search(re.escape(source), sentence, re.IGNORECASE):
                 continue
+            if source == "FRED" and re.search(
+                r"DGS2|DGS10|DGS30|DGS|CPI|PCE|PPI|WTI|Brent|daily|intraday|日度|盘中",
+                sentence,
+                re.IGNORECASE,
+            ):
+                continue
             if source.lower() in allowed_sources:
                 continue
             if _has_boundary_marker(sentence):
@@ -141,9 +156,19 @@ def _unsupported_market_data_claims(text: str, facts: dict[str, Any]) -> list[st
     hits = []
     for pattern in patterns:
         hits.extend(match.group(0) for match in re.finditer(pattern, text, re.IGNORECASE))
+    hits.extend(
+        match.group(0)
+        for match in re.finditer(
+            r"(?:DGS2|DGS10|DGS30|CPIAUCSL|CPILFESL|PCEPI|PCEPILFE|PPIACO|DCOILWTICO|DCOILBRENTEU|WTI|Brent)[^\n。；]{0,32}\d+(?:\.\d+)?%?",
+            text,
+            re.IGNORECASE,
+        )
+    )
     filtered = []
     for hit in hits:
         window = _surrounding_text(text, hit, 20)
+        if _claim_has_boundary_context(text, hit):
+            continue
         if _has_boundary_marker(window):
             continue
         if _is_observation_date_reference(window):
@@ -154,10 +179,27 @@ def _unsupported_market_data_claims(text: str, facts: dict[str, Any]) -> list[st
     return filtered
 
 
+def _claim_has_boundary_context(text: str, hit: str) -> bool:
+    for sentence in _sentences(text):
+        if hit not in sentence:
+            continue
+        if _has_boundary_marker(sentence):
+            return True
+        if re.search(r"(?:如果|假如|若|假设|if)", sentence, re.IGNORECASE):
+            return True
+        if re.search(r"(?:如果|假如|若|假设|if)[^\n。；]{0,40}" + re.escape(hit), sentence, re.IGNORECASE):
+            return True
+        if re.search(re.escape(hit) + r"[^\n。；]{0,40}(?:不能确认|无法确认|无法验证|未经核实|not confirmed)", sentence, re.IGNORECASE):
+            return True
+    return False
+
+
 def _provided_market_data_claim(text: str, facts: dict[str, Any]) -> bool:
     terms = facts.get("provided_market_data_terms")
     if not isinstance(terms, list):
         return False
+    if _provided_rates_inflation_oil_claim(text, terms):
+        return True
     if any(
         str(term).strip() and re.search(re.escape(str(term)), text, re.IGNORECASE)
         for term in terms
@@ -182,6 +224,38 @@ def _is_observation_date_reference(text: str) -> bool:
     if not re.search(r"观测值|观察日期|observation_date|取自|截至", text, re.IGNORECASE):
         return False
     return bool(re.search(r"20\d{2}[-‑–/年]\d{1,2}", text))
+
+
+def _provided_rates_inflation_oil_claim(text: str, terms: list[Any]) -> bool:
+    normalized_text = re.sub(r"\s+", "", text)
+    normalized_terms = {re.sub(r"\s+", "", str(term)).lower() for term in terms}
+    if normalized_terms.intersection(
+        {
+            "dgs2",
+            "dgs10",
+            "dgs30",
+            "nominal_yield_2y",
+            "nominal_yield_10y",
+            "nominal_yield_30y",
+            "nominalyield",
+            "10-yeartreasuryyield",
+            "30-yeartreasuryyield",
+        }
+    ) and re.search(r"(?:DGS2|DGS10|DGS30|Treasuryyield|nominalyield|5%)", normalized_text, re.IGNORECASE):
+        return True
+    if normalized_terms.intersection({"cpi", "corecpi", "pce", "corepce", "ppiaco", "ppi"}) and re.search(
+        r"(?:CPI|PCE|PPI|PPIACO)",
+        normalized_text,
+        re.IGNORECASE,
+    ):
+        return True
+    if normalized_terms.intersection({"wti", "brent", "oil", "dcoilwtico", "dcoilbrenteu"}) and re.search(
+        r"(?:WTI|Brent|oil)",
+        normalized_text,
+        re.IGNORECASE,
+    ):
+        return True
+    return False
 
 
 def _trade_like_instruction(text: str) -> bool:

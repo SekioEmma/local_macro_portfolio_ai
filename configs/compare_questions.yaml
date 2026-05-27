@@ -22,3 +22,11 @@ questions:
   - id: monthly_macro_portfolio_review
     style: analyst_memo
     question: "帮我做一次本月宏观和组合复盘：市场温度、持仓偏离、DCA、现金准备金和数据限制应该怎么看？"
+
+  - id: treasury_yield_5pct
+    style: analyst_memo
+    question: "最近有人说30年期美债收益率一度高于5%，长端利率压力会不会重新压制美股和黄金？你怎么看它对标普、纳指、短债和黄金的含义？"
+
+  - id: inflation_oil_pressure
+    style: analyst_memo
+    question: "如果CPI/PPI没有明显降温，同时油价又上涨，这对美股、债券和黄金分别意味着什么？这种情况更像普通回调还是通胀型冲击？"

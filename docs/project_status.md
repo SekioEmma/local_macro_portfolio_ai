@@ -703,3 +703,13 @@ Status: implemented locally; pending user review and commit.
 Scope: enrich the local, auditable financial conditions package for DeepSeek Pro analyst memos. This stage adds timestamped FRED/public data fields for credit spread, VIX, real yield, inflation expectations, and the 10Y-2Y yield curve, while keeping valuation proxy and FedWatch probability explicit as unavailable unless stable configured sources are added.
 
 Boundaries: do not make DeepSeek the default provider, do not modify portfolio policy or target allocation logic, do not store API keys, and do not commit real generated outputs.
+
+### Stage 7.3a-DS: DeepSeek rates, inflation, oil data package
+
+Status: implemented locally; pending user review and commit.
+
+Scope: expand the DeepSeek Pro market data package with FRED-configured nominal Treasury yields, derived daily recent highs and 5 percent threshold metrics, monthly inflation indicators, oil indicators, and explicit unavailable/research-needed boundaries. This stage also adds a market analysis framework so DeepSeek Pro reasons in the order: credit and financial stress, nominal/real rates, inflation and oil, valuation and earnings boundary, market structure boundary, and portfolio observation.
+
+Boundaries: this stage does not modify qwen evaluation, qwen guardrails, qwen fallback, ask_local_ai.py, run_llm_eval.py, portfolio policy, target allocation, DCA policy, or cash reserve logic. It does not add FedWatch, forward PE, FactSet, Bloomberg, Reuters, paid data, or webpage scraping.
+
+Note: `market_data_package` is currently consumed only by the DeepSeek profile. The qwen `prompt_builder.py` path does not read it; any future qwen use should separately evaluate context length and hallucination risk.

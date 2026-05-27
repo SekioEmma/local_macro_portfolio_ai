@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import csv
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +19,19 @@ FINANCIAL_CONDITION_KEYS = (
     "yield_curve_10y2y",
     "valuation_proxy",
     "fedwatch_probability",
+)
+TREASURY_NOMINAL_YIELD_KEYS = (
+    "nominal_yield_2y",
+    "nominal_yield_10y",
+    "nominal_yield_30y",
+)
+INFLATION_INDICATOR_KEYS = (
+    "headline_cpi",
+    "core_cpi",
+    "headline_pce",
+    "core_pce",
+    "ppi_all_commodities",
+    "ppi_final_demand",
 )
 REQUIRED_CORE_KEYS = (
     "sp500",
@@ -113,6 +126,10 @@ def get_core_market_snapshot(config_path: str = "configs/data_sources.yaml") -> 
     _load_project_dotenv()
 
     config = load_data_source_config(config_path)
+    financial_conditions = {
+        key: get_financial_condition_item(key, config)
+        for key in FINANCIAL_CONDITION_KEYS
+    }
 
     return {
         "market_data": {
@@ -127,12 +144,122 @@ def get_core_market_snapshot(config_path: str = "configs/data_sources.yaml") -> 
             key: get_market_item(key, config)
             for key in FX_DATA_KEYS
         },
-        "financial_conditions": {
-            key: get_financial_condition_item(key, config)
-            for key in FINANCIAL_CONDITION_KEYS
-        },
+        "financial_conditions": financial_conditions,
+        "market_data_package": get_market_data_package(
+            config,
+            financial_conditions=financial_conditions,
+            generated_at=generated_at,
+        ),
         "official_sources": fed_provider.get_fed_public_sources(),
         "generated_at": generated_at,
+    }
+
+
+def get_market_data_package(
+    config: dict,
+    *,
+    financial_conditions: dict[str, dict],
+    generated_at: str,
+) -> dict:
+    package_config = _optional_mapping(config, "deepseek_market_data_package")
+    treasury_config = _optional_mapping(package_config, "treasury_yields")
+    inflation_config = _optional_mapping(package_config, "inflation_indicators")
+    oil_config = _optional_mapping(package_config, "oil_and_energy")
+    unavailable_config = _optional_mapping(package_config, "unavailable_or_research_needed")
+
+    treasury_yields = {
+        key: _fred_package_item(
+            key=key,
+            item_config=_optional_mapping(treasury_config, key),
+            expected_frequency="daily",
+            max_stale_days=7,
+            timestamp=generated_at,
+        )
+        for key in TREASURY_NOMINAL_YIELD_KEYS
+    }
+    treasury_yields.update(_build_treasury_derived_metrics(treasury_yields, generated_at))
+
+    inflation_indicators = {
+        key: _package_item_from_config(
+            key=key,
+            item_config=_optional_mapping(inflation_config, key),
+            expected_frequency="monthly",
+            max_stale_days=75,
+            timestamp=generated_at,
+        )
+        for key in INFLATION_INDICATOR_KEYS
+    }
+
+    oil_and_energy = {
+        key: _fred_package_item(
+            key=key,
+            item_config=_optional_mapping(oil_config, key),
+            expected_frequency="daily",
+            max_stale_days=7,
+            timestamp=generated_at,
+        )
+        for key in ("wti_oil", "brent_oil")
+    }
+    oil_and_energy["wti_oil_30d_change"] = _oil_30d_change_item(
+        key="wti_oil_30d_change",
+        source_item=oil_and_energy["wti_oil"],
+        timestamp=generated_at,
+    )
+    oil_and_energy["brent_oil_30d_change"] = _oil_30d_change_item(
+        key="brent_oil_30d_change",
+        source_item=oil_and_energy["brent_oil"],
+        timestamp=generated_at,
+    )
+
+    existing_financial_conditions = {
+        key: financial_conditions[key]
+        for key in (
+            "high_yield_spread",
+            "vix",
+            "real_yield_10y",
+            "breakeven_inflation_10y",
+            "yield_curve_10y2y",
+        )
+        if isinstance(financial_conditions.get(key), dict)
+    }
+    unavailable = {
+        key: _package_unavailable_item(key, item_config, generated_at)
+        for key, item_config in unavailable_config.items()
+        if isinstance(item_config, dict)
+    }
+
+    return {
+        "generated_at": generated_at,
+        "data_cutoff": _package_data_cutoff(
+            treasury_yields,
+            inflation_indicators,
+            oil_and_energy,
+            existing_financial_conditions,
+        ),
+        "treasury_yields": treasury_yields,
+        "inflation_indicators": inflation_indicators,
+        "oil_and_energy": oil_and_energy,
+        "existing_financial_conditions": existing_financial_conditions,
+        "unavailable_or_research_needed": unavailable,
+        "market_analysis_framework": _market_analysis_framework(),
+        "market_regime_classification_rules": _market_regime_classification_rules(),
+        "data_limitations": [
+            "no intraday Treasury highs",
+            "no FedWatch probability",
+            "no forward PE / FactSet valuation",
+            "no consensus CPI/PPI surprise data",
+            "no PPI final demand confirmed series",
+            "no market breadth / concentration data",
+        ],
+        "interpretation_boundaries": [
+            "FRED DGS10/DGS30 are daily observations, not intraday highs.",
+            "CPI/PCE/PPI are low-frequency inflation data; do not overread one release.",
+            "Oil price changes can signal energy pressure but do not alone determine inflation.",
+            "Treasury yields near 5% are rate-pressure signals, not standalone trading signals.",
+            "Missing FedWatch means no rate-cut probability can be quantified.",
+            "Missing valuation data means no exact PE or forward PE claim.",
+            "Market judgement must proceed from credit/liquidity -> rates -> inflation/oil -> valuation/earnings -> breadth -> portfolio observation.",
+        ],
     }
 
 
@@ -304,6 +431,650 @@ def _fred_financial_condition_item(
         "series_id": result.get("series_id") or series_id,
         "timestamp": result.get("timestamp") or timestamp,
         "attempted_sources": [attempt],
+    }
+
+
+def _package_item_from_config(
+    *,
+    key: str,
+    item_config: dict,
+    expected_frequency: str,
+    max_stale_days: int,
+    timestamp: str,
+) -> dict:
+    provider = str(item_config.get("provider") or "").strip().lower()
+    if provider == "fred":
+        return _fred_package_item(
+            key=key,
+            item_config=item_config,
+            expected_frequency=expected_frequency,
+            max_stale_days=max_stale_days,
+            timestamp=timestamp,
+        )
+    if provider in {"not_available", "research_needed"}:
+        return _package_unavailable_item(key, item_config, timestamp)
+    return _package_item(
+        key=key,
+        name=str(item_config.get("name") or key),
+        value=None,
+        unit=item_config.get("unit"),
+        observation_date=None,
+        source="not_configured",
+        source_tier=item_config.get("source_tier") or "not_available",
+        freshness="not_available",
+        status="not_configured",
+        error=f"Unsupported provider for {key}: {provider or 'missing'}",
+        interpretation_hint=item_config.get("interpretation_hint"),
+        risk_relevance=item_config.get("risk_relevance"),
+        timestamp=timestamp,
+    )
+
+
+def _fred_package_item(
+    *,
+    key: str,
+    item_config: dict,
+    expected_frequency: str,
+    max_stale_days: int,
+    timestamp: str,
+) -> dict:
+    series_id = str(item_config.get("series_id") or "").strip()
+    name = str(item_config.get("name") or key)
+    source = f"FRED:{series_id}" if series_id else "not_configured"
+    if not series_id:
+        return _package_item(
+            key=key,
+            name=name,
+            value=None,
+            unit=item_config.get("unit"),
+            observation_date=None,
+            source=source,
+            source_tier=item_config.get("source_tier") or "not_available",
+            freshness="not_available",
+            status="not_configured",
+            error=f"{key}.series_id not configured",
+            interpretation_hint=item_config.get("interpretation_hint"),
+            risk_relevance=item_config.get("risk_relevance"),
+            timestamp=timestamp,
+        )
+
+    result = fred_provider.get_fred_latest(series_id)
+    value = _to_float_or_none(result.get("value"))
+    if result.get("status") != "ok" or value is None:
+        return _package_item(
+            key=key,
+            name=name,
+            value=None,
+            unit=item_config.get("unit"),
+            observation_date=result.get("observation_date"),
+            source=source,
+            source_tier=item_config.get("source_tier") or "official_or_public_data_api",
+            freshness="unknown",
+            status="error",
+            error=str(result.get("error") or "FRED request failed"),
+            interpretation_hint=item_config.get("interpretation_hint"),
+            risk_relevance=item_config.get("risk_relevance"),
+            timestamp=result.get("timestamp") or timestamp,
+            series_id=series_id,
+            attempted_sources=[_package_attempt(result, series_id, item_config)],
+        )
+
+    observation_date = result.get("observation_date")
+    return _package_item(
+        key=key,
+        name=name,
+        value=value,
+        unit=item_config.get("unit"),
+        observation_date=observation_date,
+        source=source,
+        source_tier=item_config.get("source_tier") or "official_or_public_data_api",
+        freshness=_package_freshness(
+            observation_date,
+            expected_frequency=expected_frequency,
+            max_stale_days=max_stale_days,
+        ),
+        status="ok",
+        error=None,
+        interpretation_hint=item_config.get("interpretation_hint"),
+        risk_relevance=item_config.get("risk_relevance"),
+        timestamp=result.get("timestamp") or timestamp,
+        series_id=series_id,
+        attempted_sources=[_package_attempt(result, series_id, item_config)],
+    )
+
+
+def _build_treasury_derived_metrics(treasury_yields: dict[str, dict], timestamp: str) -> dict[str, dict]:
+    result = {}
+    for prefix, source_key in (
+        ("dgs10", "nominal_yield_10y"),
+        ("dgs30", "nominal_yield_30y"),
+    ):
+        source_item = treasury_yields.get(source_key, {})
+        series_id = str(source_item.get("series_id") or "").strip()
+        history = _fred_history(series_id, limit=140) if series_id else []
+        for window_days in (30, 60):
+            result[f"{prefix}_{window_days}d_high"] = _recent_high_item(
+                key=f"{prefix}_{window_days}d_high",
+                source_item=source_item,
+                history=history,
+                window_days=window_days,
+                timestamp=timestamp,
+            )
+        result[f"{prefix}_distance_to_5pct"] = _distance_to_5pct_item(
+            key=f"{prefix}_distance_to_5pct",
+            source_item=source_item,
+            timestamp=timestamp,
+        )
+        result[f"{prefix}_above_5pct"] = _above_5pct_item(
+            key=f"{prefix}_above_5pct",
+            source_item=source_item,
+            timestamp=timestamp,
+        )
+    return result
+
+
+def _recent_high_item(
+    *,
+    key: str,
+    source_item: dict,
+    history: list[dict],
+    window_days: int,
+    timestamp: str,
+) -> dict:
+    latest_date = _parse_date(source_item.get("observation_date"))
+    if source_item.get("status") != "ok":
+        return _source_error_derived_item(
+            key,
+            source_item,
+            "Cannot calculate recent high because source data is unavailable.",
+            timestamp,
+            window_days=window_days,
+            calculation=f"max daily FRED observation over the latest {window_days} calendar days",
+        )
+    if latest_date is None:
+        return _derived_package_error(
+            key,
+            source_item,
+            "Latest source observation unavailable for recent high calculation.",
+            timestamp,
+            window_days=window_days,
+            calculation=f"max daily FRED observation over the latest {window_days} calendar days",
+            status="error",
+            freshness="unknown",
+            interpretation_hint="Cannot calculate recent high because the latest source observation date is unavailable.",
+        )
+
+    start_date = latest_date - timedelta(days=window_days)
+    window = [
+        item
+        for item in history
+        if isinstance(item.get("date"), date) and start_date <= item["date"] <= latest_date
+    ]
+    if not window:
+        return _derived_package_error(
+            key,
+            source_item,
+            f"No valid observations in {window_days} day window.",
+            timestamp,
+            window_days=window_days,
+            calculation=f"max daily FRED observation over the latest {window_days} calendar days",
+        )
+
+    high = max(window, key=lambda item: item["value"])
+    high_date = high["date"].isoformat()
+    return _package_item(
+        key=key,
+        name=f"{source_item.get('name') or source_item.get('series_id')} {window_days}D High",
+        value=float(high["value"]),
+        unit=source_item.get("unit"),
+        observation_date=high_date,
+        source=source_item.get("source"),
+        source_tier=source_item.get("source_tier"),
+        freshness=source_item.get("freshness"),
+        status="ok",
+        error=None,
+        interpretation_hint="FRED daily constant maturity yield; not intraday high.",
+        risk_relevance="Recent daily high helps frame whether long rates are pressing toward key thresholds.",
+        timestamp=timestamp,
+        series_id=source_item.get("series_id"),
+        source_series=source_item.get("source"),
+        derived_from=source_item.get("source"),
+        window_days=window_days,
+        high_date=high_date,
+        intraday_high_available=False,
+        calculation=f"max daily FRED observation over the latest {window_days} calendar days",
+    )
+
+
+def _distance_to_5pct_item(*, key: str, source_item: dict, timestamp: str) -> dict:
+    value = _to_float_or_none(source_item.get("value"))
+    if source_item.get("status") != "ok":
+        return _source_error_derived_item(
+            key,
+            source_item,
+            "Cannot calculate distance to 5% because source data is unavailable.",
+            timestamp,
+            calculation="latest_value - 5.0 percentage points",
+        )
+    if value is None:
+        return _derived_package_error(
+            key,
+            source_item,
+            "Latest source observation unavailable for 5 percent distance calculation.",
+            timestamp,
+            calculation="latest_value - 5.0 percentage points",
+            status="error",
+            freshness="unknown",
+            interpretation_hint="Cannot calculate distance to 5% because the latest source value is unavailable.",
+        )
+    return _package_item(
+        key=key,
+        name=f"{source_item.get('name') or source_item.get('series_id')} Distance to 5%",
+        value=round(value - 5.0, 4),
+        unit="percentage_points",
+        observation_date=source_item.get("observation_date"),
+        source=source_item.get("source"),
+        source_tier=source_item.get("source_tier"),
+        freshness=source_item.get("freshness"),
+        status="ok",
+        error=None,
+        interpretation_hint="Positive value means the latest daily FRED observation is above 5%; negative means below 5%.",
+        risk_relevance="Frames long-rate pressure near the 5% threshold without using intraday highs.",
+        timestamp=timestamp,
+        series_id=source_item.get("series_id"),
+        source_series=source_item.get("source"),
+        derived_from=source_item.get("source"),
+        intraday_high_available=False,
+        calculation="latest_value - 5.0 percentage points",
+    )
+
+
+def _above_5pct_item(*, key: str, source_item: dict, timestamp: str) -> dict:
+    value = _to_float_or_none(source_item.get("value"))
+    if source_item.get("status") != "ok":
+        return _source_error_derived_item(
+            key,
+            source_item,
+            "Cannot calculate above-5% flag because source data is unavailable.",
+            timestamp,
+            calculation="latest_value >= 5.0",
+        )
+    if value is None:
+        return _derived_package_error(
+            key,
+            source_item,
+            "Latest source observation unavailable for above 5 percent calculation.",
+            timestamp,
+            calculation="latest_value >= 5.0",
+            status="error",
+            freshness="unknown",
+            interpretation_hint="Cannot calculate above-5% flag because the latest source value is unavailable.",
+        )
+    return _package_item(
+        key=key,
+        name=f"{source_item.get('name') or source_item.get('series_id')} Above 5%",
+        value=bool(value >= 5.0),
+        unit="boolean",
+        observation_date=source_item.get("observation_date"),
+        source=source_item.get("source"),
+        source_tier=source_item.get("source_tier"),
+        freshness=source_item.get("freshness"),
+        status="ok",
+        error=None,
+        interpretation_hint="True only if the latest daily FRED observation is at or above 5%.",
+        risk_relevance="Flags rate-pressure threshold using daily observations only.",
+        timestamp=timestamp,
+        series_id=source_item.get("series_id"),
+        source_series=source_item.get("source"),
+        derived_from=source_item.get("source"),
+        intraday_high_available=False,
+        calculation="latest_value >= 5.0",
+    )
+
+
+def _oil_30d_change_item(*, key: str, source_item: dict, timestamp: str) -> dict:
+    latest_value = _to_float_or_none(source_item.get("value"))
+    latest_date = _parse_date(source_item.get("observation_date"))
+    series_id = str(source_item.get("series_id") or "").strip()
+    if source_item.get("status") != "ok":
+        return _source_error_derived_item(
+            key,
+            source_item,
+            "Cannot calculate 30 day oil change because source data is unavailable.",
+            timestamp,
+            window_days=30,
+            calculation="(latest_value - value_30d_ago_or_nearest_available) / old_value * 100",
+        )
+    if latest_value is None or latest_date is None or not series_id:
+        return _derived_package_error(
+            key,
+            source_item,
+            "Latest oil observation unavailable for 30 day change calculation.",
+            timestamp,
+            window_days=30,
+            calculation="(latest_value - value_30d_ago_or_nearest_available) / old_value * 100",
+            status="error",
+            freshness="unknown",
+            interpretation_hint="Cannot calculate 30 day oil change because the latest source observation is unavailable.",
+        )
+
+    old = _nearest_observation(
+        _fred_history(series_id, limit=90),
+        latest_date - timedelta(days=30),
+        exclude_date=latest_date,
+    )
+    old_value = _to_float_or_none(old.get("value")) if isinstance(old, dict) else None
+    if old_value is None or old_value == 0:
+        return _derived_package_error(
+            key,
+            source_item,
+            "No valid historical oil observation near 30 days ago.",
+            timestamp,
+            window_days=30,
+            calculation="(latest_value - value_30d_ago_or_nearest_available) / old_value * 100",
+        )
+
+    change_abs = latest_value - old_value
+    change_pct = change_abs / old_value * 100
+    return _package_item(
+        key=key,
+        name=f"{source_item.get('name') or series_id} 30D Change",
+        value=round(change_pct, 4),
+        unit="percent",
+        observation_date=source_item.get("observation_date"),
+        source=source_item.get("source"),
+        source_tier=source_item.get("source_tier"),
+        freshness=source_item.get("freshness"),
+        status="ok",
+        error=None,
+        interpretation_hint="30 day change uses nearest available daily FRED observation, not intraday price.",
+        risk_relevance="Oil momentum can indicate energy pressure but does not alone determine inflation.",
+        timestamp=timestamp,
+        series_id=series_id,
+        source_series=source_item.get("source"),
+        derived_from=source_item.get("source"),
+        window_days=30,
+        calculation="(latest_value - value_30d_ago_or_nearest_available) / old_value * 100",
+        change_abs=round(change_abs, 4),
+        change_pct=round(change_pct, 4),
+        old_value=old_value,
+        old_observation_date=old["date"].isoformat() if isinstance(old.get("date"), date) else None,
+    )
+
+
+def _package_unavailable_item(key: str, item_config: dict, timestamp: str) -> dict:
+    status = str(item_config.get("status") or item_config.get("provider") or "not_available")
+    if status not in {"not_available", "research_needed"}:
+        status = "not_available"
+    return _package_item(
+        key=key,
+        name=str(item_config.get("name") or key),
+        value=None,
+        unit=item_config.get("unit"),
+        observation_date=None,
+        source=status,
+        source_tier=item_config.get("source_tier") or status,
+        freshness=status,
+        status=status,
+        error=item_config.get("unavailable_reason") or f"{key} is {status}.",
+        interpretation_hint=item_config.get("interpretation_hint"),
+        risk_relevance=item_config.get("risk_relevance"),
+        timestamp=timestamp,
+    )
+
+
+def _derived_package_error(
+    key: str,
+    source_item: dict,
+    error: str,
+    timestamp: str,
+    *,
+    window_days: int | None = None,
+    calculation: str | None = None,
+    status: str = "insufficient_history",
+    freshness: str = "insufficient_history",
+    interpretation_hint: str | None = None,
+) -> dict:
+    return _package_item(
+        key=key,
+        name=key,
+        value=None,
+        unit=None,
+        observation_date=source_item.get("observation_date"),
+        source=source_item.get("source"),
+        source_tier=source_item.get("source_tier"),
+        freshness=freshness,
+        status=status,
+        error=error,
+        interpretation_hint=interpretation_hint,
+        risk_relevance=None,
+        timestamp=timestamp,
+        series_id=source_item.get("series_id"),
+        source_series=source_item.get("source"),
+        derived_from=source_item.get("source"),
+        window_days=window_days,
+        calculation=calculation,
+    )
+
+
+def _source_error_derived_item(
+    key: str,
+    source_item: dict,
+    interpretation_hint: str,
+    timestamp: str,
+    *,
+    window_days: int | None = None,
+    calculation: str | None = None,
+) -> dict:
+    source_error = str(source_item.get("error") or "Source data unavailable.")
+    return _package_item(
+        key=key,
+        name=key,
+        value=None,
+        unit=None,
+        observation_date=source_item.get("observation_date"),
+        source=source_item.get("source"),
+        source_tier=source_item.get("source_tier"),
+        freshness=source_item.get("freshness") or "unknown",
+        status="error",
+        error=source_error,
+        interpretation_hint=interpretation_hint,
+        risk_relevance=None,
+        timestamp=timestamp,
+        series_id=source_item.get("series_id"),
+        source_series=source_item.get("source"),
+        derived_from=source_item.get("source"),
+        window_days=window_days,
+        calculation=calculation,
+    )
+
+
+def _package_item(
+    *,
+    key: str,
+    name: str,
+    value: Any,
+    unit: Any,
+    observation_date: str | None,
+    source: str | None,
+    source_tier: str | None,
+    freshness: str | None,
+    status: str,
+    error: str | None,
+    interpretation_hint: str | None,
+    risk_relevance: str | None,
+    timestamp: str,
+    series_id: str | None = None,
+    attempted_sources: list[dict] | None = None,
+    **extra: Any,
+) -> dict:
+    item = {
+        "key": key,
+        "name": name,
+        "value": value,
+        "unit": unit,
+        "observation_date": observation_date,
+        "source": source,
+        "source_tier": source_tier,
+        "freshness": freshness,
+        "status": status,
+        "error": error,
+        "interpretation_hint": interpretation_hint,
+        "risk_relevance": risk_relevance,
+        "timestamp": timestamp,
+        "attempted_sources": attempted_sources or [],
+    }
+    if series_id:
+        item["series_id"] = series_id
+    item.update({extra_key: extra_value for extra_key, extra_value in extra.items() if extra_value is not None})
+    return item
+
+
+def _package_attempt(result: dict, series_id: str, item_config: dict) -> dict:
+    return {
+        "source": result.get("source") or "FRED",
+        "status": result.get("status", "error"),
+        "error": result.get("error"),
+        "timestamp": result.get("timestamp"),
+        "series_id": result.get("series_id") or series_id,
+        "observation_date": result.get("observation_date"),
+        "source_tier": item_config.get("source_tier"),
+    }
+
+
+def _fred_history(series_id: str, limit: int) -> list[dict]:
+    result = fred_provider.get_fred_series(series_id, limit=limit)
+    if result.get("status") != "ok":
+        return []
+    observations = []
+    for item in result.get("data", []):
+        observed_at = _parse_date(item.get("date"))
+        value = _to_float_or_none(item.get("value"))
+        if observed_at is not None and value is not None:
+            observations.append({"date": observed_at, "value": value})
+    return observations
+
+
+def _nearest_observation(
+    observations: list[dict],
+    target_date: date,
+    *,
+    exclude_date: date,
+) -> dict | None:
+    candidates = [
+        item
+        for item in observations
+        if isinstance(item.get("date"), date) and item["date"] != exclude_date
+    ]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda item: abs((item["date"] - target_date).days))
+
+
+def _package_data_cutoff(*groups: dict[str, Any]) -> str | None:
+    dates = []
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        for item in group.values():
+            if not isinstance(item, dict) or item.get("status") != "ok":
+                continue
+            observed_at = _parse_date(item.get("observation_date"))
+            if observed_at:
+                dates.append(observed_at)
+    return max(dates).isoformat() if dates else None
+
+
+def _package_freshness(
+    observation_date: Any,
+    *,
+    expected_frequency: str,
+    max_stale_days: int,
+) -> str:
+    observed_at = _parse_date(observation_date)
+    if observed_at is None:
+        return "unknown"
+    today = datetime.now(timezone.utc).date()
+    if expected_frequency == "monthly":
+        month_gap = (today.year - observed_at.year) * 12 + today.month - observed_at.month
+        if month_gap <= 2:
+            return "normal_lag"
+        if month_gap == 3:
+            return "extended_lag"
+        return "stale"
+    return "fresh" if (today - observed_at).days <= max_stale_days else "stale"
+
+
+def _parse_date(value: Any) -> date | None:
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
+
+
+def _market_analysis_framework() -> dict[str, dict[str, Any]]:
+    return {
+        "step_1_credit_and_financial_stress": {
+            "purpose": "First judge whether there is evidence of systemic crisis.",
+            "inputs": ["high_yield_spread", "investment_grade_spread if available", "financial_stress_index if available", "vix"],
+            "rule": "When credit spreads and financial stress are normal, do not classify an equity pullback as systemic crisis only because prices fell.",
+        },
+        "step_2_nominal_and_real_rates": {
+            "purpose": "Judge whether valuation pressure comes from nominal yields, real yields, or curve structure.",
+            "inputs": ["DGS2", "DGS10", "DGS30", "DFII10", "T10Y2Y", "DGS10/DGS30 recent highs"],
+            "rule": "10Y/30Y near or above 5% is a rate-pressure signal, not a standalone trading signal.",
+        },
+        "step_3_inflation_and_oil": {
+            "purpose": "Judge whether inflation and energy pressure constrain easing.",
+            "inputs": ["CPI", "core CPI", "PCE", "core PCE", "PPIACO", "WTI", "Brent", "T10YIE"],
+            "rule": "Rising oil can add inflation pressure, but it must not be mechanically equated with runaway inflation.",
+        },
+        "step_4_valuation_and_earnings_boundary": {
+            "purpose": "Judge whether valuation and earnings can be discussed as facts.",
+            "inputs": ["valuation_proxy", "forward_pe", "cape", "earnings_revision"],
+            "rule": "If valuation and earnings data are not_available, say the package cannot confirm valuation level; do not invent PE or forward PE.",
+        },
+        "step_5_market_structure_boundary": {
+            "purpose": "Judge whether market gains are overly concentrated.",
+            "inputs": ["market_breadth", "equal_weight_vs_cap_weight", "mega_cap_concentration"],
+            "rule": "If breadth and concentration data are missing, do not assert that AI/mega-cap concentration has worsened; mark it as an observation gap.",
+        },
+        "step_6_portfolio_observation": {
+            "purpose": "Only then translate the macro state into long-term portfolio observation.",
+            "allowed_language": ["relative overweight/underweight versus target", "risk exposure rising/falling", "future DCA evaluation", "threshold review", "year-end review", "rebalancing evaluation"],
+            "forbidden_language": ["should buy", "should sell", "liquidate", "wait for a dip", "adjust immediately", "specific buy/sell amount"],
+        },
+    }
+
+
+def _market_regime_classification_rules() -> dict[str, dict[str, Any]]:
+    return {
+        "normal_pullback": {
+            "evidence": ["equity drawdown or volatility", "credit spreads still normal", "VIX not showing panic", "no systemic deterioration in earnings, jobs, or funding"],
+            "boundary": "Do not automatically upgrade normal pullback to crisis.",
+        },
+        "sideways_valuation_digest": {
+            "evidence": ["rates elevated", "earnings not broken", "valuation data missing or high pending confirmation", "indices move sideways or churn"],
+            "boundary": "Sideways digestion may be more realistic than a fast V-shaped repair, but do not forecast timing.",
+        },
+        "rates_inflation_shock": {
+            "evidence": ["DGS10/DGS30 rising", "real yield rising", "CPI/PPI/PCE or oil pressure", "equities, bonds, and gold can all face pressure"],
+            "boundary": "Inflation shock differs from ordinary safe-haven risk.",
+        },
+        "trend_reversal": {
+            "evidence": ["earnings revisions down", "market breadth deterioration", "rates/dollar/liquidity persistently pressuring assets"],
+            "boundary": "If earnings and breadth data are missing, do not confirm trend reversal.",
+        },
+        "systemic_crisis": {
+            "evidence": ["credit spreads widen materially", "financial stress rises", "funding, banks, jobs, and earnings show multi-signal deterioration"],
+            "boundary": "Without multi-signal confirmation, do not confirm systemic crisis.",
+        },
+        "ai_bubble_risk": {
+            "evidence": ["real technology trend", "valuation overextension", "earnings delivery insufficient", "capex return uncertain", "concentration rising", "high real yields pressuring duration"],
+            "boundary": "If valuation, earnings, and concentration data are missing, discuss mechanism only; do not confirm bubble magnitude.",
+        },
     }
 
 

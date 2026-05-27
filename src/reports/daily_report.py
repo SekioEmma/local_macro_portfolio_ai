@@ -47,6 +47,7 @@ def build_daily_report_json(
 ) -> dict:
     market_summary = _build_market_summary(market_snapshot)
     financial_conditions = _build_financial_conditions_summary(market_snapshot)
+    market_data_package = _build_market_data_package_summary(market_snapshot)
     temperature_assessment = market_temperature.get("temperature_assessment", {})
     temperature_summary = _build_temperature_summary(temperature_assessment)
     data_limitations = _build_data_limitations(
@@ -109,6 +110,7 @@ def build_daily_report_json(
         "dca_daily_plan": portfolio_snapshot.get("dca_daily_plan", {}),
         "market_summary": market_summary,
         "financial_conditions": financial_conditions,
+        "market_data_package": market_data_package,
         "temperature_summary": temperature_summary,
         "data_sources": _extract_data_sources(market_snapshot, market_temperature),
         "data_limitations": data_limitations,
@@ -195,9 +197,13 @@ def render_daily_report_markdown(report: dict) -> str:
         "",
         _market_table(report["market_summary"]),
         "",
-        "## 5. Market Stress / Financial Conditions Snapshot",
+        "## 5. Rates, Inflation, Oil, and Financial Conditions",
         "",
-        _financial_conditions_table(report.get("financial_conditions", {})),
+        _market_data_package_table(report.get("market_data_package", {})),
+        "",
+        "Required boundaries:",
+        "",
+        _bullet_list(_market_data_package_boundaries(report.get("market_data_package", {}))),
         "",
         "## 6. Market Temperature",
         "",
@@ -298,6 +304,64 @@ def _build_financial_conditions_summary(market_snapshot: dict) -> dict:
         item = financial_conditions.get(key)
         summary["items"].append(_financial_condition_summary(key, item))
     return summary
+
+
+def _build_market_data_package_summary(market_snapshot: dict) -> dict:
+    package = market_snapshot.get("market_data_package")
+    if not isinstance(package, dict):
+        package = {}
+
+    groups = {}
+    for group_name in (
+        "treasury_yields",
+        "inflation_indicators",
+        "oil_and_energy",
+        "existing_financial_conditions",
+        "unavailable_or_research_needed",
+    ):
+        group = package.get(group_name)
+        groups[group_name] = {
+            key: _market_data_package_item_summary(key, item)
+            for key, item in group.items()
+        } if isinstance(group, dict) else {}
+
+    return {
+        "generated_at": package.get("generated_at") or market_snapshot.get("generated_at"),
+        "data_cutoff": package.get("data_cutoff"),
+        **groups,
+        "data_limitations": package.get("data_limitations", []),
+        "interpretation_boundaries": package.get("interpretation_boundaries", []),
+    }
+
+
+def _market_data_package_item_summary(key: str, item: Any) -> dict:
+    if not isinstance(item, dict):
+        return _financial_condition_summary(key, item)
+    data_quality = item.get("data_quality", {})
+    return {
+        "key": item.get("key") or key,
+        "name": item.get("name") or key,
+        "value": item.get("value"),
+        "unit": item.get("unit"),
+        "observation_date": item.get("observation_date"),
+        "source": item.get("source"),
+        "source_tier": item.get("source_tier")
+        or (data_quality.get("source_tier") if isinstance(data_quality, dict) else None),
+        "freshness": item.get("freshness")
+        or (data_quality.get("freshness_status") if isinstance(data_quality, dict) else None),
+        "status": item.get("status"),
+        "error": item.get("error"),
+        "interpretation_hint": item.get("interpretation_hint"),
+        "risk_relevance": item.get("risk_relevance"),
+        "window_days": item.get("window_days"),
+        "high_date": item.get("high_date"),
+        "source_series": item.get("source_series"),
+        "derived_from": item.get("derived_from"),
+        "intraday_high_available": item.get("intraday_high_available"),
+        "calculation": item.get("calculation"),
+        "change_abs": item.get("change_abs"),
+        "change_pct": item.get("change_pct"),
+    }
 
 
 def _financial_condition_summary(key: str, item: Any) -> dict:
@@ -442,6 +506,25 @@ def _build_data_limitations(
             ):
                 limitations.append("manual gold missing: manual market data file not found.")
 
+    package = market_snapshot.get("market_data_package", {})
+    if isinstance(package, dict):
+        for limitation in package.get("data_limitations", []):
+            limitations.append(f"market_data_package: {limitation}")
+        for group_name in (
+            "treasury_yields",
+            "inflation_indicators",
+            "oil_and_energy",
+            "unavailable_or_research_needed",
+        ):
+            group = package.get(group_name)
+            if not isinstance(group, dict):
+                continue
+            for key, item in group.items():
+                if isinstance(item, dict) and item.get("status") not in {"ok", "stale_cache"}:
+                    limitations.append(
+                        f"market_data_package.{group_name}.{key}: {item.get('status')} - {item.get('error')}"
+                    )
+
     for item_key in ("nasdaq100", "gold"):
         item = market_summary.get(item_key, {})
         if item.get("status") not in {"ok", "stale_cache"} and item.get("error"):
@@ -554,6 +637,21 @@ def _extract_data_sources(market_snapshot: dict, market_temperature: dict) -> li
                     ):
                         continue
                     sources.append(_source_record(key, attempt))
+
+    package = market_snapshot.get("market_data_package")
+    if isinstance(package, dict):
+        for group_name in (
+            "treasury_yields",
+            "inflation_indicators",
+            "oil_and_energy",
+            "existing_financial_conditions",
+        ):
+            group = package.get(group_name)
+            if not isinstance(group, dict):
+                continue
+            for key, item in group.items():
+                if isinstance(item, dict):
+                    sources.append(_source_record(key, item))
 
     input_status = market_temperature.get("input_series_status", {})
     if isinstance(input_status, dict):
@@ -802,6 +900,73 @@ def _financial_conditions_table(financial_conditions: dict) -> str:
         ],
         rows,
     )
+
+
+def _market_data_package_table(package: dict) -> str:
+    if not isinstance(package, dict):
+        return "No market data package recorded."
+    ordered_groups = (
+        "treasury_yields",
+        "inflation_indicators",
+        "oil_and_energy",
+        "existing_financial_conditions",
+    )
+    rows = []
+    for group_name in ordered_groups:
+        group = package.get(group_name)
+        if not isinstance(group, dict):
+            continue
+        for key, item in group.items():
+            if not isinstance(item, dict):
+                continue
+            value = _format_number(item.get("value"))
+            unit = item.get("unit")
+            if item.get("value") is not None and unit:
+                value = f"{value} {unit}"
+            rows.append(
+                [
+                    group_name,
+                    _display(item.get("key") or key),
+                    _display(item.get("name")),
+                    value,
+                    _display(item.get("observation_date")),
+                    _display(item.get("source")),
+                    _display(item.get("freshness")),
+                    _display(item.get("status")),
+                    _display(item.get("interpretation_hint")),
+                ]
+            )
+    if not rows:
+        return "No market data package recorded."
+    return _markdown_table(
+        [
+            "Group",
+            "Key",
+            "Name",
+            "Value",
+            "Observation date",
+            "Source",
+            "Freshness",
+            "Status",
+            "Interpretation hint",
+        ],
+        rows,
+    )
+
+
+def _market_data_package_boundaries(package: dict) -> list[str]:
+    boundaries = []
+    if isinstance(package, dict):
+        boundaries.extend(str(item) for item in package.get("interpretation_boundaries", []) if item)
+        boundaries.extend(str(item) for item in package.get("data_limitations", []) if item)
+    required = [
+        "DGS10/DGS30 are FRED daily constant maturity yields, not intraday highs.",
+        "Intraday Treasury highs are not provided.",
+        "FedWatch probability is not provided.",
+        "Forward PE / FactSet / Bloomberg valuation data are not provided.",
+        "Consensus CPI/PPI data are not provided, so surprise claims are not supported.",
+    ]
+    return _dedupe([*boundaries, *required])
 
 
 def _temperature_table(temperature_summary: dict) -> str:

@@ -59,7 +59,7 @@ def build_deepseek_prompt_package(
             "provided_data": "以下 data_package 由本地系统确定性提供。",
             "missing_data": "未出现在 data_package 中的数据视为未提供，模型不能补编，也不能暗示已经查询外部实时数据。",
             "allowed_inference_scope": "可以基于已提供事实、一般宏观机制和长期配置原则做条件化分析。",
-            "forbidden_inference": "不能把未提供的 PE、forward PE、CAPE、valuation percentile、FedWatch、Reuters、FactSet、Bloomberg、Goldman、实时价格或机构观点写成事实；credit spread、VIX、real yield、inflation expectation、yield curve 只能在 financial_conditions 明确提供时引用。",
+            "forbidden_inference": "不能把未提供的 PE、forward PE、CAPE、valuation percentile、FedWatch、Reuters、FactSet、Bloomberg、Goldman、实时价格或机构观点写成事实；credit spread、VIX、real yield、inflation expectation、yield curve、DGS2/DGS10/DGS30、CPI/PCE/PPI、WTI/Brent 只能在 data_package 明确提供时引用。",
             "output_requirements": "若用户问题提到缺失数据，必须明确说本地 context 未提供这些数据，因此不能确认该项；以下只能从一般机制和已有数据出发分析。",
         },
         "data_package": facts["prompt_facts"],
@@ -86,6 +86,18 @@ def build_deepseek_prompt_package(
             "如果 high_yield_spread 可用，可以讨论信用压力是否升温，但不得把单一利差读数机械等同于危机。",
             "如果 VIX 可用，可以讨论波动率压力，但不得把 VIX 单点读数机械等同于买卖信号。",
             "所有市场判断必须引用 observation_date 或说明基于本地 context 提供的最新观察日期。",
+        ],
+        "rates_inflation_oil_rules": [
+            "可以讨论 10Y / 30Y 是否接近 5%，但必须说明数据来自 FRED 日度观察，不代表盘中高点。",
+            "如果用户说前几天收益率高于 5%，而 data package 只有 FRED daily，必须回答：当前数据包只能验证日度观察值和近期高点，不能验证盘中高点。",
+            "可以讨论 CPI/PCE/PPI，但不能说超预期，除非 context 中提供 consensus / expected data。",
+            "可以讨论 WTI/Brent 对通胀和利率的潜在传导，但不能机械等同于通胀失控。",
+            "可以讨论油价、通胀、利率对标普、纳指、黄金、短债的条件化影响。",
+            "不能编造 FedWatch 概率。",
+            "不能编造 PE、forward PE、CAPE、FactSet、Bloomberg、Reuters。",
+            "不能在缺失广度和集中度数据时确认 AI/巨头集中度恶化。",
+            "组合含义只能落到相对目标、观察方向、后续定投评估、阈值复核、年末复核、再平衡评估。",
+            "不输出交易指令。",
         ],
         "asset_role_non_absolutism": [
             "short_bond 通常波动低于权益和长债，但不等于无风险，也可能受利率和流动性环境影响。",
@@ -166,6 +178,9 @@ def _extract_facts(context_json: dict[str, Any], *, context_mode: str) -> dict[s
     financial_conditions = _financial_conditions_for_prompt(
         _as_dict(context_json.get("financial_conditions"))
     )
+    market_data_package = _market_data_package_for_prompt(
+        _as_dict(context_json.get("market_data_package"))
+    )
     limitations = context_json.get("data_limitations")
     if not isinstance(limitations, list):
         limitations = []
@@ -187,7 +202,7 @@ def _extract_facts(context_json: dict[str, Any], *, context_mode: str) -> dict[s
     generated_at = context_json.get("generated_at")
     holdings_snapshot_date = portfolio.get("holdings_updated_at") or portfolio_facts.get("holdings_updated_at")
     market_observation_dates = _market_source_timestamps(market_facts)
-    missing_data = _missing_data_terms(financial_conditions)
+    missing_data = _missing_data_terms(financial_conditions, market_data_package)
 
     portfolio_package: dict[str, Any] = {
         "target_allocation": target_allocation,
@@ -263,14 +278,15 @@ def _extract_facts(context_json: dict[str, Any], *, context_mode: str) -> dict[s
         "portfolio_facts": portfolio_package,
         "market_facts": market_package,
         "financial_conditions": financial_conditions,
+        "market_data_package": market_data_package,
     }
     validator_facts = {
         "allocation_direction": direction,
         "target_allocation": target_allocation,
         "context_mode": context_mode,
-        "missing_data_terms": missing_data + _missing_data_terms_cn(financial_conditions),
-        "allowed_external_sources": _financial_condition_sources(financial_conditions),
-        "provided_market_data_terms": _provided_market_data_terms(financial_conditions),
+        "missing_data_terms": missing_data + _missing_data_terms_cn(financial_conditions, market_data_package),
+        "allowed_external_sources": _data_package_sources(financial_conditions, market_data_package),
+        "provided_market_data_terms": _provided_market_data_terms(financial_conditions, market_data_package),
     }
     return {"prompt_facts": prompt_facts, "validator_facts": validator_facts}
 
@@ -316,7 +332,76 @@ def _financial_conditions_for_prompt(financial_conditions: dict[str, Any]) -> di
     }
 
 
-def _missing_data_terms(financial_conditions: dict[str, Any]) -> list[str]:
+def _market_data_package_for_prompt(package: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "section": "RATES / INFLATION / OIL DATA",
+        "generated_at": package.get("generated_at"),
+        "data_cutoff": package.get("data_cutoff"),
+        "treasury_yields": _package_group_for_prompt(package.get("treasury_yields")),
+        "inflation_indicators": _package_group_for_prompt(package.get("inflation_indicators")),
+        "oil_and_energy": _package_group_for_prompt(package.get("oil_and_energy")),
+        "existing_financial_conditions": _package_group_for_prompt(
+            package.get("existing_financial_conditions")
+        ),
+        "unavailable_or_research_needed": _package_group_for_prompt(
+            package.get("unavailable_or_research_needed")
+        ),
+        "market_analysis_framework": _as_dict(package.get("market_analysis_framework")),
+        "market_regime_classification_rules": _as_dict(
+            package.get("market_regime_classification_rules")
+        ),
+        "data_limitations": _as_list_of_str(package.get("data_limitations")),
+        "interpretation_boundaries": _as_list_of_str(package.get("interpretation_boundaries")),
+        "usage_boundary": (
+            "Use only status=ok items as factual market data. FRED DGS10/DGS30 are daily "
+            "observations, not intraday highs. Missing valuation, FedWatch, consensus CPI/PPI, "
+            "breadth, and concentration data must not be inferred."
+        ),
+    }
+
+
+def _package_group_for_prompt(group: Any) -> dict[str, Any]:
+    if not isinstance(group, dict):
+        return {}
+    return {
+        str(key): _package_item_for_prompt(item)
+        for key, item in group.items()
+        if isinstance(item, dict)
+    }
+
+
+def _package_item_for_prompt(item: dict[str, Any]) -> dict[str, Any]:
+    keys = (
+        "key",
+        "name",
+        "value",
+        "unit",
+        "observation_date",
+        "source",
+        "source_tier",
+        "freshness",
+        "status",
+        "error",
+        "interpretation_hint",
+        "risk_relevance",
+        "derived_from",
+        "source_series",
+        "window_days",
+        "high_date",
+        "intraday_high_available",
+        "calculation",
+        "change_abs",
+        "change_pct",
+        "old_value",
+        "old_observation_date",
+    )
+    return {key: item.get(key) for key in keys if key in item}
+
+
+def _missing_data_terms(
+    financial_conditions: dict[str, Any],
+    market_data_package: dict[str, Any],
+) -> list[str]:
     missing_data = [
         "PE",
         "forward PE",
@@ -330,6 +415,7 @@ def _missing_data_terms(financial_conditions: dict[str, Any]) -> list[str]:
         "real-time market prices",
     ]
     statuses = _financial_condition_statuses(financial_conditions)
+    package_statuses = _package_statuses(market_data_package)
     if statuses.get("valuation_proxy") != "ok":
         missing_data.extend(["valuation proxy", "valuation multiples"])
     if statuses.get("fedwatch_probability") != "ok":
@@ -344,11 +430,29 @@ def _missing_data_terms(financial_conditions: dict[str, Any]) -> list[str]:
         missing_data.append("10-year breakeven inflation")
     if statuses.get("yield_curve_10y2y") != "ok":
         missing_data.append("10Y-2Y yield curve")
+    for key, terms in {
+        "ppi_final_demand": ["PPI final demand"],
+        "forward_pe": ["forward PE"],
+        "cape": ["CAPE"],
+        "earnings_revision": ["earnings revision"],
+        "market_breadth": ["market breadth"],
+        "equal_weight_vs_cap_weight": ["equal weight vs cap weight"],
+        "mega_cap_concentration": ["mega-cap concentration"],
+        "intraday_treasury_high": ["intraday Treasury high", "intraday high"],
+        "consensus_cpi": ["consensus CPI", "CPI surprise"],
+        "consensus_ppi": ["consensus PPI", "PPI surprise"],
+    }.items():
+        if package_statuses.get(key) != "ok":
+            missing_data.extend(terms)
     return _dedupe_strings(missing_data)
 
 
-def _missing_data_terms_cn(financial_conditions: dict[str, Any]) -> list[str]:
+def _missing_data_terms_cn(
+    financial_conditions: dict[str, Any],
+    market_data_package: dict[str, Any],
+) -> list[str]:
     statuses = _financial_condition_statuses(financial_conditions)
+    package_statuses = _package_statuses(market_data_package)
     terms = ["估值", "收益率点位", "黄金价格"]
     if statuses.get("fedwatch_probability") != "ok":
         terms.extend(["FedWatch", "降息概率"])
@@ -358,6 +462,16 @@ def _missing_data_terms_cn(financial_conditions: dict[str, Any]) -> list[str]:
         terms.append("信用利差")
     if statuses.get("vix") != "ok":
         terms.append("VIX")
+    if package_statuses.get("intraday_treasury_high") != "ok":
+        terms.extend(["盘中高点", "盘中突破"])
+    if package_statuses.get("consensus_cpi") != "ok":
+        terms.extend(["CPI超预期", "CPI 超预期"])
+    if package_statuses.get("consensus_ppi") != "ok":
+        terms.extend(["PPI超预期", "PPI 超预期"])
+    if package_statuses.get("market_breadth") != "ok":
+        terms.append("市场广度")
+    if package_statuses.get("mega_cap_concentration") != "ok":
+        terms.append("巨头集中度")
     return _dedupe_strings(terms)
 
 
@@ -375,34 +489,151 @@ def _financial_condition_statuses(financial_conditions: dict[str, Any]) -> dict[
     return statuses
 
 
-def _financial_condition_sources(financial_conditions: dict[str, Any]) -> list[str]:
-    sources = []
+def _item_is_provided_market_data(item: Any) -> bool:
+    return (
+        isinstance(item, dict)
+        and item.get("status") == "ok"
+        and item.get("value") is not None
+        and not item.get("error")
+    )
+
+
+def _financial_condition_available(financial_conditions: dict[str, Any]) -> dict[str, bool]:
+    available = {}
     items = financial_conditions.get("items")
     if not isinstance(items, list):
-        return sources
+        return available
     for item in items:
-        if not isinstance(item, dict) or item.get("status") != "ok":
+        if not isinstance(item, dict):
             continue
-        source = item.get("source")
-        if source:
-            sources.append(str(source))
+        key = item.get("key")
+        if key:
+            available[str(key)] = _item_is_provided_market_data(item)
+    return available
+
+
+def _data_package_sources(
+    financial_conditions: dict[str, Any],
+    market_data_package: dict[str, Any],
+) -> list[str]:
+    sources = []
+    items = financial_conditions.get("items")
+    if isinstance(items, list):
+        for item in items:
+            if not _item_is_provided_market_data(item):
+                continue
+            source = item.get("source")
+            if source:
+                sources.extend(_source_aliases(str(source)))
+    for group_name in (
+        "treasury_yields",
+        "inflation_indicators",
+        "oil_and_energy",
+        "existing_financial_conditions",
+    ):
+        group = market_data_package.get(group_name)
+        if not isinstance(group, dict):
+            continue
+        for item in group.values():
+            if not _item_is_provided_market_data(item):
+                continue
+            source = item.get("source")
+            if source:
+                sources.extend(_source_aliases(str(source)))
     return _dedupe_strings(sources)
 
 
-def _provided_market_data_terms(financial_conditions: dict[str, Any]) -> list[str]:
-    statuses = _financial_condition_statuses(financial_conditions)
+def _source_aliases(source: str) -> list[str]:
+    if source.upper().startswith("FRED"):
+        return [source, "FRED"]
+    return [source]
+
+
+def _provided_market_data_terms(
+    financial_conditions: dict[str, Any],
+    market_data_package: dict[str, Any],
+) -> list[str]:
+    available = _financial_condition_available(financial_conditions)
     terms = []
-    if statuses.get("high_yield_spread") == "ok":
+    if available.get("high_yield_spread"):
         terms.extend(["high_yield_spread", "high yield", "credit spread", "信用利差", "高收益"])
-    if statuses.get("vix") == "ok":
+    if available.get("vix"):
         terms.extend(["vix", "VIX", "波动率"])
-    if statuses.get("real_yield_10y") == "ok":
+    if available.get("real_yield_10y"):
         terms.extend(["real_yield_10y", "real yield", "实际利率", "实际收益率", "10年期实际利率", "TIPS"])
-    if statuses.get("breakeven_inflation_10y") == "ok":
+    if available.get("breakeven_inflation_10y"):
         terms.extend(["breakeven", "盈亏平衡通胀", "通胀预期"])
-    if statuses.get("yield_curve_10y2y") == "ok":
+    if available.get("yield_curve_10y2y"):
         terms.extend(["yield_curve_10y2y", "10Y-2Y", "10年-2年", "收益率曲线"])
+    package_available = _package_available(market_data_package)
+    if package_available.get("nominal_yield_2y"):
+        terms.extend(["DGS2", "nominal_yield_2y", "nominal yield", "名义收益率", "2年期美债收益率"])
+    if package_available.get("nominal_yield_10y"):
+        terms.extend(["DGS10", "nominal_yield_10y", "10-year Treasury yield", "10年期美债收益率", "10Y"])
+    if package_available.get("nominal_yield_30y"):
+        terms.extend(["DGS30", "nominal_yield_30y", "30-year Treasury yield", "30年期美债收益率", "30Y"])
+    for key in ("dgs10_30d_high", "dgs10_60d_high", "dgs30_30d_high", "dgs30_60d_high"):
+        if package_available.get(key):
+            terms.append(key)
+            terms.append("recent high")
+            terms.append("近期高点")
+    for key in ("dgs10_distance_to_5pct", "dgs30_distance_to_5pct", "dgs10_above_5pct", "dgs30_above_5pct"):
+        if package_available.get(key):
+            terms.extend([key, "5%", "5 percent", "5%阈值"])
+    if package_available.get("headline_cpi"):
+        terms.extend(["CPI", "headline CPI", "CPIAUCSL"])
+    if package_available.get("core_cpi"):
+        terms.extend(["core CPI", "CPILFESL"])
+    if package_available.get("headline_pce"):
+        terms.extend(["PCE", "headline PCE", "PCEPI"])
+    if package_available.get("core_pce"):
+        terms.extend(["core PCE", "PCEPILFE"])
+    if package_available.get("ppi_all_commodities"):
+        terms.extend(["PPIACO", "PPI", "all commodities PPI"])
+    if package_available.get("wti_oil"):
+        terms.extend(["WTI", "oil", "原油", "DCOILWTICO"])
+    if package_available.get("brent_oil"):
+        terms.extend(["Brent", "oil", "原油", "DCOILBRENTEU"])
+    if package_available.get("wti_oil_30d_change"):
+        terms.extend(["wti_oil_30d_change", "oil_30d_change", "30d oil change"])
+    if package_available.get("brent_oil_30d_change"):
+        terms.extend(["brent_oil_30d_change", "oil_30d_change", "30d oil change"])
     return _dedupe_strings(terms)
+
+
+def _package_statuses(market_data_package: dict[str, Any]) -> dict[str, str]:
+    statuses = {}
+    for group_name in (
+        "treasury_yields",
+        "inflation_indicators",
+        "oil_and_energy",
+        "existing_financial_conditions",
+        "unavailable_or_research_needed",
+    ):
+        group = market_data_package.get(group_name)
+        if not isinstance(group, dict):
+            continue
+        for key, item in group.items():
+            if isinstance(item, dict):
+                statuses[str(key)] = str(item.get("status") or "")
+    return statuses
+
+
+def _package_available(market_data_package: dict[str, Any]) -> dict[str, bool]:
+    available = {}
+    for group_name in (
+        "treasury_yields",
+        "inflation_indicators",
+        "oil_and_energy",
+        "existing_financial_conditions",
+        "unavailable_or_research_needed",
+    ):
+        group = market_data_package.get(group_name)
+        if not isinstance(group, dict):
+            continue
+        for key, item in group.items():
+            available[str(key)] = _item_is_provided_market_data(item)
+    return available
 
 
 def _sanitize_dca(

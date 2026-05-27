@@ -94,6 +94,14 @@ fred_series:
     series_id: "DGS10"
     name: "10-Year Treasury Constant Maturity Rate"
     asset_type: "interest_rate"
+  dgs2:
+    series_id: "DGS2"
+    name: "2-Year Treasury Constant Maturity Rate"
+    asset_type: "interest_rate"
+  dgs30:
+    series_id: "DGS30"
+    name: "30-Year Treasury Constant Maturity Rate"
+    asset_type: "interest_rate"
   fedfunds:
     series_id: "FEDFUNDS"
     name: "Federal Funds Effective Rate"
@@ -102,10 +110,30 @@ fred_series:
     series_id: "CPIAUCSL"
     name: "Consumer Price Index for All Urban Consumers"
     asset_type: "inflation"
+  core_cpi:
+    series_id: "CPILFESL"
+    name: "Consumer Price Index Less Food and Energy"
+    asset_type: "inflation"
   pce:
     series_id: "PCEPI"
     name: "Personal Consumption Expenditures Price Index"
     asset_type: "inflation"
+  core_pce:
+    series_id: "PCEPILFE"
+    name: "Personal Consumption Expenditures Excluding Food and Energy"
+    asset_type: "inflation"
+  ppi_all_commodities:
+    series_id: "PPIACO"
+    name: "Producer Price Index by Commodity: All Commodities"
+    asset_type: "inflation"
+  wti_oil:
+    series_id: "DCOILWTICO"
+    name: "Crude Oil Prices: West Texas Intermediate"
+    asset_type: "commodity"
+  brent_oil:
+    series_id: "DCOILBRENTEU"
+    name: "Crude Oil Prices: Brent - Europe"
+    asset_type: "commodity"
   nonfarm:
     series_id: "PAYEMS"
     name: "All Employees, Total Nonfarm"
@@ -198,6 +226,111 @@ data_quality:
     max_stale_days: 7
     source_tier: "official_or_public_data_api"
     importance: "financial_conditions"
+  nominal_yield_2y:
+    expected_frequency: "daily"
+    max_stale_days: 7
+    source_tier: "official_or_public_data_api"
+    importance: "deepseek_market_data_package"
+  nominal_yield_10y:
+    expected_frequency: "daily"
+    max_stale_days: 7
+    source_tier: "official_or_public_data_api"
+    importance: "deepseek_market_data_package"
+  nominal_yield_30y:
+    expected_frequency: "daily"
+    max_stale_days: 7
+    source_tier: "official_or_public_data_api"
+    importance: "deepseek_market_data_package"
+  dgs10_30d_high:
+    expected_frequency: "daily"
+    max_stale_days: 7
+    source_tier: "official_or_public_data_api"
+    importance: "deepseek_market_data_package"
+  dgs10_60d_high:
+    expected_frequency: "daily"
+    max_stale_days: 7
+    source_tier: "official_or_public_data_api"
+    importance: "deepseek_market_data_package"
+  dgs30_30d_high:
+    expected_frequency: "daily"
+    max_stale_days: 7
+    source_tier: "official_or_public_data_api"
+    importance: "deepseek_market_data_package"
+  dgs30_60d_high:
+    expected_frequency: "daily"
+    max_stale_days: 7
+    source_tier: "official_or_public_data_api"
+    importance: "deepseek_market_data_package"
+  dgs10_distance_to_5pct:
+    expected_frequency: "daily"
+    max_stale_days: 7
+    source_tier: "official_or_public_data_api"
+    importance: "deepseek_market_data_package"
+  dgs30_distance_to_5pct:
+    expected_frequency: "daily"
+    max_stale_days: 7
+    source_tier: "official_or_public_data_api"
+    importance: "deepseek_market_data_package"
+  dgs10_above_5pct:
+    expected_frequency: "daily"
+    max_stale_days: 7
+    source_tier: "official_or_public_data_api"
+    importance: "deepseek_market_data_package"
+  dgs30_above_5pct:
+    expected_frequency: "daily"
+    max_stale_days: 7
+    source_tier: "official_or_public_data_api"
+    importance: "deepseek_market_data_package"
+  headline_cpi:
+    expected_frequency: "monthly"
+    max_stale_days: 75
+    source_tier: "official_or_public_data_api"
+    importance: "deepseek_market_data_package"
+  core_cpi:
+    expected_frequency: "monthly"
+    max_stale_days: 75
+    source_tier: "official_or_public_data_api"
+    importance: "deepseek_market_data_package"
+  headline_pce:
+    expected_frequency: "monthly"
+    max_stale_days: 75
+    source_tier: "official_or_public_data_api"
+    importance: "deepseek_market_data_package"
+  core_pce:
+    expected_frequency: "monthly"
+    max_stale_days: 75
+    source_tier: "official_or_public_data_api"
+    importance: "deepseek_market_data_package"
+  ppi_all_commodities:
+    expected_frequency: "monthly"
+    max_stale_days: 75
+    source_tier: "official_or_public_data_api"
+    importance: "deepseek_market_data_package"
+  ppi_final_demand:
+    expected_frequency: "monthly"
+    max_stale_days: 75
+    source_tier: "research_needed"
+    importance: "deepseek_market_data_package"
+  wti_oil:
+    expected_frequency: "daily"
+    max_stale_days: 7
+    source_tier: "official_or_public_data_api"
+    importance: "deepseek_market_data_package"
+  brent_oil:
+    expected_frequency: "daily"
+    max_stale_days: 7
+    source_tier: "official_or_public_data_api"
+    importance: "deepseek_market_data_package"
+  wti_oil_30d_change:
+    expected_frequency: "daily"
+    max_stale_days: 7
+    source_tier: "official_or_public_data_api"
+    importance: "deepseek_market_data_package"
+  brent_oil_30d_change:
+    expected_frequency: "daily"
+    max_stale_days: 7
+    source_tier: "official_or_public_data_api"
+    importance: "deepseek_market_data_package"
 
 macro_regime_series:
   sp500:
@@ -317,6 +450,149 @@ financial_conditions:
     interpretation_hint: "FedWatch probability is not available from configured sources."
     risk_relevance: "Prevents the model from inventing market-implied Fed probability data."
     unavailable_reason: "No configured official or stable public API for FedWatch probability."
+
+deepseek_market_data_package:
+  treasury_yields:
+    nominal_yield_2y:
+      provider: "fred"
+      series_id: "DGS2"
+      name: "2-Year Treasury Constant Maturity Rate"
+      unit: "percent"
+      source_tier: "official_or_public_data_api"
+      interpretation_hint: "Short-end nominal yield proxy for policy-rate pressure."
+      risk_relevance: "Helps separate policy-path pressure from long-duration rate pressure."
+    nominal_yield_10y:
+      provider: "fred"
+      series_id: "DGS10"
+      name: "10-Year Treasury Constant Maturity Rate"
+      unit: "percent"
+      source_tier: "official_or_public_data_api"
+      interpretation_hint: "FRED daily constant maturity yield; not intraday high."
+      risk_relevance: "Long-rate pressure can affect equity valuation, bonds, and gold opportunity cost."
+    nominal_yield_30y:
+      provider: "fred"
+      series_id: "DGS30"
+      name: "30-Year Treasury Constant Maturity Rate"
+      unit: "percent"
+      source_tier: "official_or_public_data_api"
+      interpretation_hint: "FRED daily constant maturity yield; not intraday high."
+      risk_relevance: "Helps assess long-end rate pressure, term premium, and duration risk."
+  inflation_indicators:
+    headline_cpi:
+      provider: "fred"
+      series_id: "CPIAUCSL"
+      name: "Consumer Price Index for All Urban Consumers"
+      unit: "index"
+      frequency: "monthly"
+      source_tier: "official_or_public_data_api"
+      interpretation_hint: "Monthly CPI index; do not infer surprise versus consensus without expected data."
+      risk_relevance: "Consumer-price level context for inflation pressure."
+    core_cpi:
+      provider: "fred"
+      series_id: "CPILFESL"
+      name: "Consumer Price Index Less Food and Energy"
+      unit: "index"
+      frequency: "monthly"
+      source_tier: "official_or_public_data_api"
+      interpretation_hint: "Monthly core CPI index; do not overread one release."
+      risk_relevance: "Core inflation stickiness can affect rate expectations and duration assets."
+    headline_pce:
+      provider: "fred"
+      series_id: "PCEPI"
+      name: "Personal Consumption Expenditures Price Index"
+      unit: "index"
+      frequency: "monthly"
+      source_tier: "official_or_public_data_api"
+      interpretation_hint: "Monthly PCE price index; do not infer surprise versus consensus."
+      risk_relevance: "PCE inflation context for policy-rate pressure."
+    core_pce:
+      provider: "fred"
+      series_id: "PCEPILFE"
+      name: "Personal Consumption Expenditures Excluding Food and Energy"
+      unit: "index"
+      frequency: "monthly"
+      source_tier: "official_or_public_data_api"
+      interpretation_hint: "Monthly core PCE index; one observation is not a full trend."
+      risk_relevance: "Core PCE context for inflation persistence and policy pressure."
+    ppi_all_commodities:
+      provider: "fred"
+      series_id: "PPIACO"
+      name: "Producer Price Index by Commodity: All Commodities"
+      unit: "index"
+      frequency: "monthly"
+      source_tier: "official_or_public_data_api"
+      interpretation_hint: "PPIACO is all commodities PPI, not final demand PPI."
+      risk_relevance: "Upstream price-pressure context; not a consensus-surprise measure."
+    ppi_final_demand:
+      provider: "research_needed"
+      name: "PPI Final Demand"
+      unit: "index"
+      source_tier: "research_needed"
+      interpretation_hint: "PPI final demand series is not configured until the series id is verified."
+      risk_relevance: "Prevents the model from treating PPIACO as final demand PPI."
+      unavailable_reason: "Series id research needed; do not guess."
+  oil_and_energy:
+    wti_oil:
+      provider: "fred"
+      series_id: "DCOILWTICO"
+      name: "Crude Oil Prices: West Texas Intermediate"
+      unit: "USD per barrel"
+      source_tier: "official_or_public_data_api"
+      interpretation_hint: "Daily WTI oil price; energy pressure indicator, not a standalone inflation forecast."
+      risk_relevance: "Oil price changes can transmit into energy inflation and rate pressure."
+    brent_oil:
+      provider: "fred"
+      series_id: "DCOILBRENTEU"
+      name: "Crude Oil Prices: Brent - Europe"
+      unit: "USD per barrel"
+      source_tier: "official_or_public_data_api"
+      interpretation_hint: "Daily Brent oil price; global energy pressure indicator."
+      risk_relevance: "Helps assess global energy shocks and inflation pressure."
+  unavailable_or_research_needed:
+    valuation_proxy:
+      status: "not_available"
+      name: "Valuation Proxy"
+      unavailable_reason: "No configured audited valuation API."
+    forward_pe:
+      status: "not_available"
+      name: "Forward PE"
+      unavailable_reason: "No configured audited forward PE source."
+    cape:
+      status: "research_needed"
+      name: "CAPE"
+      unavailable_reason: "Research needed before configuring a stable source."
+    earnings_revision:
+      status: "not_available"
+      name: "Earnings Revision"
+      unavailable_reason: "No configured audited earnings revision source."
+    fedwatch_probability:
+      status: "not_available"
+      name: "FedWatch Probability"
+      unavailable_reason: "No configured stable public API."
+    market_breadth:
+      status: "research_needed"
+      name: "Market Breadth"
+      unavailable_reason: "Research needed for a stable auditable source."
+    equal_weight_vs_cap_weight:
+      status: "research_needed"
+      name: "Equal Weight vs Cap Weight"
+      unavailable_reason: "Research needed for a stable auditable source."
+    mega_cap_concentration:
+      status: "research_needed"
+      name: "Mega-cap Concentration"
+      unavailable_reason: "Research needed for a stable auditable source."
+    intraday_treasury_high:
+      status: "not_available"
+      name: "Intraday Treasury High"
+      unavailable_reason: "FRED DGS series provide daily observations, not intraday highs."
+    consensus_cpi:
+      status: "not_available"
+      name: "Consensus CPI"
+      unavailable_reason: "No configured consensus estimate source."
+    consensus_ppi:
+      status: "not_available"
+      name: "Consensus PPI"
+      unavailable_reason: "No configured consensus estimate source."
 
 crisis_windows:
   global_financial_crisis:

@@ -153,6 +153,7 @@ def build_llm_context_pack(
 ) -> dict:
     confirmed_facts = _build_confirmed_facts(portfolio_snapshot, market_snapshot)
     financial_conditions = _build_financial_conditions(market_snapshot)
+    market_data_package = _build_market_data_package(market_snapshot)
     data_limitations = _build_data_limitations(
         portfolio_snapshot,
         market_snapshot,
@@ -175,6 +176,7 @@ def build_llm_context_pack(
         ),
         "confirmed_facts": confirmed_facts,
         "financial_conditions": financial_conditions,
+        "market_data_package": market_data_package,
         "rule_based_assessments": _build_rule_based_assessments(
             market_temperature,
             macro_regime_history,
@@ -207,6 +209,7 @@ def render_llm_context_markdown(context_pack: dict) -> str:
     facts = context_pack.get("confirmed_facts", {})
     portfolio = context_pack.get("portfolio_context", {})
     financial_conditions = context_pack.get("financial_conditions", {})
+    market_data_package = context_pack.get("market_data_package", {})
     assessments = context_pack.get("rule_based_assessments", {})
     historical = context_pack.get("historical_context", {})
     data_quality = context_pack.get("data_quality", {})
@@ -240,6 +243,26 @@ def render_llm_context_markdown(context_pack: dict) -> str:
         "Financial condition interpretation boundaries:",
         "",
         _bullet_list(financial_conditions.get("interpretation_boundaries", []), "No interpretation boundaries recorded."),
+        "",
+        "### Rates, Inflation, Oil, and Analysis Method",
+        "",
+        _market_data_package_table(market_data_package),
+        "",
+        "Market data package limitations:",
+        "",
+        _bullet_list(market_data_package.get("data_limitations", []), "No market data package limitations recorded."),
+        "",
+        "Market data package interpretation boundaries:",
+        "",
+        _bullet_list(market_data_package.get("interpretation_boundaries", []), "No interpretation boundaries recorded."),
+        "",
+        "Market analysis framework:",
+        "",
+        _framework_table(market_data_package.get("market_analysis_framework", {})),
+        "",
+        "Market regime classification rules:",
+        "",
+        _regime_rules_table(market_data_package.get("market_regime_classification_rules", {})),
         "",
         "### Account Facts",
         "",
@@ -455,6 +478,76 @@ def _financial_condition_limitations(items: list[dict]) -> list[str]:
     return _dedupe_strings(limitations)
 
 
+def _build_market_data_package(market_snapshot: dict) -> dict:
+    package = market_snapshot.get("market_data_package")
+    if not isinstance(package, dict):
+        return {
+            "generated_at": market_snapshot.get("generated_at") or _utc_now(),
+            "data_cutoff": None,
+            "treasury_yields": {},
+            "inflation_indicators": {},
+            "oil_and_energy": {},
+            "existing_financial_conditions": {},
+            "unavailable_or_research_needed": {},
+            "market_analysis_framework": {},
+            "market_regime_classification_rules": {},
+            "data_limitations": ["market_data_package missing from market snapshot"],
+            "interpretation_boundaries": [],
+        }
+
+    return {
+        "generated_at": package.get("generated_at") or market_snapshot.get("generated_at") or _utc_now(),
+        "data_cutoff": package.get("data_cutoff"),
+        "treasury_yields": _compact_package_group(package.get("treasury_yields")),
+        "inflation_indicators": _compact_package_group(package.get("inflation_indicators")),
+        "oil_and_energy": _compact_package_group(package.get("oil_and_energy")),
+        "existing_financial_conditions": _compact_package_group(package.get("existing_financial_conditions")),
+        "unavailable_or_research_needed": _compact_package_group(package.get("unavailable_or_research_needed")),
+        "market_analysis_framework": package.get("market_analysis_framework", {}),
+        "market_regime_classification_rules": package.get("market_regime_classification_rules", {}),
+        "data_limitations": _as_list_of_str(package.get("data_limitations")),
+        "interpretation_boundaries": _as_list_of_str(package.get("interpretation_boundaries")),
+    }
+
+
+def _compact_package_group(group: Any) -> dict:
+    if not isinstance(group, dict):
+        return {}
+    return {
+        key: _compact_package_item(item)
+        for key, item in group.items()
+        if isinstance(item, dict)
+    }
+
+
+def _compact_package_item(item: dict) -> dict:
+    keys = (
+        "key",
+        "name",
+        "value",
+        "unit",
+        "observation_date",
+        "source",
+        "source_tier",
+        "freshness",
+        "status",
+        "error",
+        "interpretation_hint",
+        "risk_relevance",
+        "derived_from",
+        "source_series",
+        "window_days",
+        "high_date",
+        "intraday_high_available",
+        "calculation",
+        "change_abs",
+        "change_pct",
+        "old_value",
+        "old_observation_date",
+    )
+    return {key: item.get(key) for key in keys if key in item}
+
+
 def _build_rule_based_assessments(market_temperature: dict, macro_regime_history: dict) -> dict:
     temperature = market_temperature.get("temperature_assessment", {})
     current = macro_regime_history.get("current_regime_snapshot", {})
@@ -643,6 +736,21 @@ def _extract_market_data_quality(market_snapshot: dict) -> dict:
         for key, item in items.items():
             if isinstance(item, dict):
                 quality[key] = item.get("data_quality", {})
+    package = market_snapshot.get("market_data_package")
+    if isinstance(package, dict):
+        for group_name in (
+            "treasury_yields",
+            "inflation_indicators",
+            "oil_and_energy",
+            "existing_financial_conditions",
+            "unavailable_or_research_needed",
+        ):
+            group = package.get(group_name)
+            if not isinstance(group, dict):
+                continue
+            for key, item in group.items():
+                if isinstance(item, dict):
+                    quality[key] = item.get("data_quality", {})
     return quality
 
 
@@ -704,6 +812,24 @@ def _build_data_limitations(
         for key, item in items.items():
             if isinstance(item, dict) and item.get("status") != "ok":
                 limitations.append(f"{section}.{key}: {item.get('status')} - {item.get('error')}")
+
+    package = market_snapshot.get("market_data_package")
+    if isinstance(package, dict):
+        limitations.extend(str(item) for item in package.get("data_limitations", []) if item)
+        for group_name in (
+            "treasury_yields",
+            "inflation_indicators",
+            "oil_and_energy",
+            "unavailable_or_research_needed",
+        ):
+            group = package.get(group_name)
+            if not isinstance(group, dict):
+                continue
+            for key, item in group.items():
+                if isinstance(item, dict) and item.get("status") not in {"ok", "stale_cache"}:
+                    limitations.append(
+                        f"market_data_package.{group_name}.{key}: {item.get('status')} - {item.get('error')}"
+                    )
 
     for source_name, payload in (
         ("market_temperature", market_temperature),
@@ -837,6 +963,92 @@ def _financial_conditions_table(financial_conditions: dict) -> str:
         ],
         rows,
     )
+
+
+def _market_data_package_table(package: dict) -> str:
+    if not isinstance(package, dict):
+        return "No market data package available."
+    rows = []
+    for group_name in (
+        "treasury_yields",
+        "inflation_indicators",
+        "oil_and_energy",
+        "existing_financial_conditions",
+    ):
+        group = package.get(group_name)
+        if not isinstance(group, dict):
+            continue
+        for key, item in group.items():
+            if not isinstance(item, dict):
+                continue
+            value = _format_number(item.get("value"))
+            unit = item.get("unit")
+            if item.get("value") is not None and unit:
+                value = f"{value} {unit}"
+            rows.append(
+                [
+                    group_name,
+                    item.get("key") or key,
+                    item.get("name"),
+                    value,
+                    item.get("observation_date"),
+                    item.get("source"),
+                    item.get("freshness"),
+                    item.get("status"),
+                    item.get("interpretation_hint"),
+                ]
+            )
+    if not rows:
+        return "No market data package available."
+    return _markdown_table(
+        [
+            "Group",
+            "Key",
+            "Name",
+            "Value",
+            "Observation date",
+            "Source",
+            "Freshness",
+            "Status",
+            "Interpretation hint",
+        ],
+        rows,
+    )
+
+
+def _framework_table(framework: dict) -> str:
+    if not isinstance(framework, dict) or not framework:
+        return "No market analysis framework recorded."
+    rows = []
+    for key, item in framework.items():
+        if not isinstance(item, dict):
+            continue
+        rows.append(
+            [
+                key,
+                item.get("purpose"),
+                ", ".join(str(value) for value in item.get("inputs", [])),
+                item.get("rule"),
+            ]
+        )
+    return _markdown_table(["Step", "Purpose", "Inputs", "Rule"], rows)
+
+
+def _regime_rules_table(rules: dict) -> str:
+    if not isinstance(rules, dict) or not rules:
+        return "No market regime classification rules recorded."
+    rows = []
+    for key, item in rules.items():
+        if not isinstance(item, dict):
+            continue
+        rows.append(
+            [
+                key,
+                ", ".join(str(value) for value in item.get("evidence", [])),
+                item.get("boundary"),
+            ]
+        )
+    return _markdown_table(["Regime", "Evidence", "Boundary"], rows)
 
 
 def _account_facts_table(portfolio_facts: dict) -> str:
@@ -1216,6 +1428,12 @@ def _nested_value(source: dict, path: tuple[str, ...]) -> Any:
             return None
         current = current.get(key)
     return current
+
+
+def _as_list_of_str(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if item is not None]
 
 
 def _level(value: Any) -> str:
