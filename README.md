@@ -1,42 +1,40 @@
 # Local Macro Portfolio AI
 
-Local Macro Portfolio AI 是一个本地个人投研与资产配置辅助系统。它读取本地持仓快照、目标配置、定投规则和公开宏观/市场数据，生成每日报告、LLM context pack，并通过本机 Ollama 模型提供 context-only 问答。
+Local Macro Portfolio AI is a local personal macro and portfolio research helper. It reads local holdings snapshots, target allocation rules, DCA rules, and public macro/market data, then generates deterministic daily reports, an LLM context pack, and analyst memo inputs.
 
-它不是自动交易系统，不保证收益，不预测短期涨跌，也不提供具体交易指令。
+The project is not an automated trading system. It does not place orders, issue buy/sell instructions, guarantee returns, or predict short-term market moves.
 
-## 当前能力
+## Current Status
 
-- 读取 `data/holdings/current_holdings.csv` 本地持仓快照
-- 将 余额宝 / cash reserve 作为扣款来源，并排除在目标仓位权重之外
-- 计算 `sp500:nasdaq100:short_bond:gold = 5:2:2:1` 目标配置偏离
-- 显示 holdings freshness、DCA budget、现金准备金和组合结构
-- 生成 `portfolio_snapshot`、`daily_report`、`llm_context_pack`
-- 使用本地 Ollama 默认模型 `qwen3:4b`
-- 支持 `standard` 与 `analyst_memo` 两种回答风格
-- 通过 `run_llm_eval.py` 做本地回答质量回归评估
+- Default `analyst_memo` provider: DeepSeek V4 Pro.
+- Local qwen/Ollama remains available only as a legacy/offline path.
+- Deterministic scripts still build the data package before the analyst memo step.
+- Generated real outputs under `outputs/` are local artifacts and should not be committed.
 
-## Quick Start
+## Recommended Workflow
 
 Run from the project root:
 
 ```powershell
-python scripts/run_portfolio_check.py
+python scripts/run_market_data_check.py
 python scripts/run_daily_report.py
 python scripts/run_llm_context_pack.py
-python scripts/ask_local_ai.py "当前市场是否过热？对我的组合意味着什么？"
+python scripts/run_analyst_memo.py
 ```
 
-Full deterministic daily update:
+For a dry run without calling DeepSeek:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/update_daily_report.ps1
+python scripts/run_analyst_memo.py --dry-run
 ```
 
-Run local LLM eval:
+## Environment Variables
 
-```powershell
-python scripts/run_llm_eval.py
-```
+Use environment variables only. Do not write API keys into source files, docs, configs, or committed outputs.
+
+- `DEEPSEEK_API_KEY`
+- `FRED_API_KEY`
+- `ALPHA_VANTAGE_API_KEY`
 
 ## Main Docs
 
@@ -51,22 +49,20 @@ python scripts/run_llm_eval.py
 
 ## Privacy
 
-The project is designed for local use. Do not commit:
+Do not commit:
 
 - `.env`
 - API keys
 - `data/holdings/current_holdings.csv`
 - `data/private/`
-- generated `outputs/`
+- generated real `outputs/`
 - raw conversation exports
 - private account snapshots
 
 ## Non-Goals
 
-- no automatic trading
-- no cloud LLM API
-- no training or fine-tuning in the MVP workflow
-- no guaranteed returns
-- no short-term market forecast
-- no concrete buy/sell instructions
-- no use of old holding snapshots as real-time account sync
+- No automatic trading.
+- No buy/sell commands.
+- No guaranteed returns.
+- No short-term market forecasts.
+- No new financial data sources unless a future stage explicitly adds them.

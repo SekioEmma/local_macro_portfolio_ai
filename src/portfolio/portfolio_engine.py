@@ -422,6 +422,37 @@ def summarize_holdings_updated_at(holdings: list[dict]) -> dict:
     }
 
 
+def refresh_holdings_freshness(
+    portfolio_snapshot: dict,
+    generated_at: str | date | datetime | None = None,
+) -> dict:
+    if not isinstance(portfolio_snapshot, dict):
+        return portfolio_snapshot
+
+    refreshed = dict(portfolio_snapshot)
+    as_of_date = _parse_as_of_date(generated_at) or date.today()
+    holdings_updated_at = refreshed.get("holdings_updated_at")
+    holdings_date = (
+        _parse_holding_date(str(holdings_updated_at))
+        if holdings_updated_at
+        else None
+    )
+
+    if holdings_date is None:
+        refreshed["holdings_age_days"] = None
+        refreshed["holdings_freshness_status"] = "unknown"
+        if not holdings_updated_at:
+            refreshed["holdings_updated_at_status"] = (
+                refreshed.get("holdings_updated_at_status") or "missing"
+            )
+        return refreshed
+
+    age_days = (as_of_date - holdings_date).days
+    refreshed["holdings_age_days"] = age_days
+    refreshed["holdings_freshness_status"] = _classify_holdings_freshness(age_days)
+    return refreshed
+
+
 def _parse_holding_date(value: str) -> date | None:
     raw_value = str(value).strip()
     if not raw_value:
@@ -434,6 +465,16 @@ def _parse_holding_date(value: str) -> date | None:
         return date.fromisoformat(raw_value[:10])
     except ValueError:
         return None
+
+
+def _parse_as_of_date(value: str | date | datetime | None) -> date | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    return _parse_holding_date(str(value))
 
 
 def _classify_holdings_freshness(age_days: int | None) -> str:

@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from portfolio.portfolio_engine import refresh_holdings_freshness
+
 
 DISCLAIMER = (
     "This report is rule-based and descriptive, not investment advice. "
@@ -45,6 +47,8 @@ def build_daily_report_json(
     market_snapshot: dict,
     market_temperature: dict,
 ) -> dict:
+    generated_at = _utc_now()
+    portfolio_snapshot = refresh_holdings_freshness(portfolio_snapshot, generated_at)
     market_summary = _build_market_summary(market_snapshot)
     financial_conditions = _build_financial_conditions_summary(market_snapshot)
     market_data_package = _build_market_data_package_summary(market_snapshot)
@@ -59,7 +63,7 @@ def build_daily_report_json(
 
     report = {
         "report_type": "daily_portfolio_market_report",
-        "generated_at": _utc_now(),
+        "generated_at": generated_at,
         "holdings_source": portfolio_snapshot.get("holdings_source", {}),
         "holdings": portfolio_snapshot.get("holdings", []),
         "account_summary": {
@@ -152,7 +156,7 @@ def render_daily_report_markdown(report: dict) -> str:
                 ],
                 ["Total profit/loss", _format_number(report["account_summary"].get("total_profit_loss"))],
                 ["Holdings snapshot updated_at", _display(report["account_summary"].get("holdings_updated_at"))],
-                ["Holdings age days", _format_number(report["account_summary"].get("holdings_age_days"))],
+                ["Holdings age days", _format_age_days(report["account_summary"].get("holdings_age_days"))],
                 ["Holdings freshness status", _display(report["account_summary"].get("holdings_freshness_status"))],
                 ["Holdings updated_at status", _display(report["account_summary"].get("holdings_updated_at_status"))],
                 ["Holdings row count", _format_number(report["account_summary"].get("holdings_row_count"))],
@@ -457,7 +461,8 @@ def _build_data_limitations(
         limitations.append(
             "holdings snapshot is "
             f"{freshness_status}: updated_at={portfolio_snapshot.get('holdings_updated_at')} "
-            f"age_days={portfolio_snapshot.get('holdings_age_days')}; account data is not real-time."
+            f"age_days={_format_age_days(portfolio_snapshot.get('holdings_age_days'))}; "
+            "account data is not real-time."
         )
     elif freshness_status == "unknown":
         limitations.append("holdings snapshot freshness is unknown; account data should not be treated as real-time.")
@@ -1033,10 +1038,18 @@ def _escape_cell(value: Any) -> str:
 def _format_number(value: Any) -> str:
     if value is None:
         return "N/A"
+    if isinstance(value, bool):
+        return "true" if value else "false"
     try:
         return f"{float(value):,.2f}"
     except (TypeError, ValueError):
         return str(value)
+
+
+def _format_age_days(value: Any) -> str:
+    if value is None:
+        return "unknown"
+    return _format_number(value)
 
 
 def _format_percent(value: Any, signed: bool = False) -> str:
@@ -1070,6 +1083,8 @@ def _display(value: Any) -> str:
         return "N/A"
     if value == "":
         return "N/A"
+    if isinstance(value, bool):
+        return "true" if value else "false"
     return str(value)
 
 

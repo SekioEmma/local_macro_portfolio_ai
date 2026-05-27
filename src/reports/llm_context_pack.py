@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from portfolio.portfolio_engine import refresh_holdings_freshness
+
 
 DISCLAIMER = (
     "This context pack is for local research reporting only. It is rule-based and descriptive, "
@@ -151,6 +153,8 @@ def build_llm_context_pack(
     market_history_features: dict,
     macro_regime_history: dict,
 ) -> dict:
+    generated_at = _utc_now()
+    portfolio_snapshot = refresh_holdings_freshness(portfolio_snapshot, generated_at)
     confirmed_facts = _build_confirmed_facts(portfolio_snapshot, market_snapshot)
     financial_conditions = _build_financial_conditions(market_snapshot)
     market_data_package = _build_market_data_package(market_snapshot)
@@ -165,7 +169,7 @@ def build_llm_context_pack(
 
     return {
         "context_pack_type": "local_macro_portfolio_ai_llm_context",
-        "generated_at": _utc_now(),
+        "generated_at": generated_at,
         "source_files": _build_source_files(
             portfolio_snapshot,
             market_snapshot,
@@ -273,7 +277,7 @@ def render_llm_context_markdown(context_pack: dict) -> str:
         "Cash is treated as cash reserve and excluded from target allocation weights by default.",
         (
             f"Holdings snapshot updated_at: {_display(portfolio.get('holdings_updated_at'))}; "
-            f"age_days: {_format_number(portfolio.get('holdings_age_days'))}; "
+            f"age_days: {_format_age_days(portfolio.get('holdings_age_days'))}; "
             f"freshness: {_display(portfolio.get('holdings_freshness_status'))}."
         ),
         "",
@@ -795,7 +799,8 @@ def _build_data_limitations(
         limitations.append(
             "holdings snapshot is "
             f"{freshness_status}: updated_at={portfolio_snapshot.get('holdings_updated_at')} "
-            f"age_days={portfolio_snapshot.get('holdings_age_days')}; account data is not real-time."
+            f"age_days={_format_age_days(portfolio_snapshot.get('holdings_age_days'))}; "
+            "account data is not real-time."
         )
     elif freshness_status == "unknown":
         limitations.append("holdings snapshot freshness is unknown; account data should not be treated as real-time.")
@@ -1064,7 +1069,7 @@ def _account_facts_table(portfolio_facts: dict) -> str:
             ["cash_reserve_value", _format_number(portfolio_facts.get("cash_reserve_value"))],
             ["total_profit_loss", _format_number(portfolio_facts.get("total_profit_loss"))],
             ["holdings_updated_at", portfolio_facts.get("holdings_updated_at")],
-            ["holdings_age_days", _format_number(portfolio_facts.get("holdings_age_days"))],
+            ["holdings_age_days", _format_age_days(portfolio_facts.get("holdings_age_days"))],
             ["holdings_freshness_status", portfolio_facts.get("holdings_freshness_status")],
             ["holdings_updated_at_status", portfolio_facts.get("holdings_updated_at_status")],
             ["holdings_row_count", _format_number(portfolio_facts.get("holdings_row_count"))],
@@ -1391,10 +1396,18 @@ def _escape_inline(value: Any) -> str:
 def _format_number(value: Any) -> str:
     if value is None:
         return "N/A"
+    if isinstance(value, bool):
+        return "true" if value else "false"
     try:
         return f"{float(value):,.2f}"
     except (TypeError, ValueError):
         return str(value)
+
+
+def _format_age_days(value: Any) -> str:
+    if value is None:
+        return "unknown"
+    return _format_number(value)
 
 
 def _format_percent(value: Any, signed: bool = False) -> str:
@@ -1445,6 +1458,8 @@ def _level(value: Any) -> str:
 def _display(value: Any) -> str:
     if value is None or value == "":
         return "N/A"
+    if isinstance(value, bool):
+        return "true" if value else "false"
     return str(value)
 
 

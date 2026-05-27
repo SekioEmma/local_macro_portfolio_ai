@@ -13,6 +13,15 @@ EXTERNAL_SOURCES = [
     "Goldman",
     "Wind",
 ]
+DGS_CONTEXT_LABEL_PATTERN = (
+    r"(?:DGS10|DGS30|10\s*年期|30\s*年期|十年期|三十年期|10Y|30Y|"
+    r"Treasury\s*yield|美债收益率|美国国债收益率)"
+)
+DGS_CONTEXT_VALUE_PATTERN = (
+    r"(?:\d+(?:\.\d+)?\s*[%％]|above[^\n。；]{0,12}5(?!\d)\s*[%％]?|below[^\n。；]{0,12}5(?!\d)\s*[%％]?|"
+    r"站上[^\n。；]{0,12}5(?!\d)\s*[%％]?|高于[^\n。；]{0,12}5(?!\d)\s*[%％]?|低于[^\n。；]{0,12}5(?!\d)\s*[%％]?|"
+    r"距离[^\n。；]{0,12}5(?!\d)\s*[%％]?|盘中|intraday)"
+)
 PAUSE_DCA_PATTERN = r"(?:暂停|停止|中断)(?:长期)?定投"
 TRADE_LIKE_PATTERNS = [
     r"应(?:该)?买入",
@@ -183,6 +192,14 @@ def _unsupported_market_data_claims(text: str, facts: dict[str, Any]) -> list[st
         )
     )
     filtered = []
+    for sentence in _sentences(text):
+        if not _requires_context_backed_dgs_check(sentence):
+            continue
+        if _has_boundary_marker(sentence):
+            continue
+        if not _context_backed_dgs_claim(sentence, facts):
+            filtered.append(sentence[:120])
+
     for hit in hits:
         sentence = _sentence_containing(text, hit)
         window = _surrounding_text(text, hit, 100)
@@ -222,7 +239,7 @@ def _provided_market_data_claim(text: str, facts: dict[str, Any]) -> bool:
     terms = facts.get("provided_market_data_terms")
     if not isinstance(terms, list):
         return False
-    if _looks_like_dgs_value_claim(text):
+    if _requires_context_backed_dgs_check(text):
         return _context_backed_dgs_claim(text, facts)
     if _provided_rates_inflation_oil_claim(text, terms):
         return True
@@ -255,7 +272,7 @@ def _is_observation_date_reference(text: str) -> bool:
 def _provided_rates_inflation_oil_claim(text: str, terms: list[Any]) -> bool:
     normalized_text = re.sub(r"\s+", "", text)
     normalized_terms = {re.sub(r"\s+", "", str(term)).lower() for term in terms}
-    if _looks_like_dgs_value_claim(text):
+    if _requires_context_backed_dgs_check(text) or _looks_like_dgs_value_claim(text):
         return False
     if normalized_terms.intersection(
         {
@@ -269,7 +286,7 @@ def _provided_rates_inflation_oil_claim(text: str, terms: list[Any]) -> bool:
             "10-yeartreasuryyield",
             "30-yeartreasuryyield",
         }
-    ) and re.search(r"(?:DGS2|DGS10|DGS30|Treasuryyield|nominalyield|5%)", normalized_text, re.IGNORECASE):
+    ) and re.search(r"(?:DGS2|DGS10|DGS30|Treasuryyield|nominalyield)", normalized_text, re.IGNORECASE):
         return True
     if normalized_terms.intersection({"cpi", "corecpi", "pce", "corepce", "ppiaco", "ppi"}) and re.search(
         r"(?:CPI|PCE|PPI|PPIACO)",
@@ -291,13 +308,17 @@ def _looks_like_dgs_value_claim(text: str) -> bool:
         return False
     if re.search(r"(?:10Y\s*-\s*2Y|10Y-2Y|10年\s*-\s*2年|收益率曲线|利差)", text, re.IGNORECASE):
         return False
-    return bool(
-        re.search(
-            r"(?:DGS10|DGS30|10\s*年期|30\s*年期|10Y|30Y)[^\n。；]{0,60}\d+(?:\.\d+)?\s*(?:%|个百分点)?",
-            text,
-            re.IGNORECASE,
-        )
-    )
+    return _requires_context_backed_dgs_check(text)
+
+
+def _requires_context_backed_dgs_check(text: str) -> bool:
+    if re.search(r"(?:实际收益率|实际利率|real\s*yield)", text, re.IGNORECASE):
+        return False
+    if re.search(r"(?:10Y\s*-\s*2Y|10Y-2Y|10年\s*-\s*2年|收益率曲线|利差)", text, re.IGNORECASE):
+        return False
+    if not re.search(DGS_CONTEXT_LABEL_PATTERN, text, re.IGNORECASE):
+        return False
+    return bool(re.search(DGS_CONTEXT_VALUE_PATTERN, text, re.IGNORECASE))
 
 
 def _context_backed_dgs_claim(text: str, facts: dict[str, Any]) -> bool:
@@ -355,10 +376,10 @@ def _dgs_text_matches_context(
     if not numbers:
         return False
 
-    above_5_claim = bool(re.search(r"(?:站上|超过|高于|突破|above)[^\n。；]{0,12}5\s*%", text, re.IGNORECASE))
+    above_5_claim = bool(re.search(r"(?:站上|超过|高于|突破|above)[^\n。；]{0,12}5(?!\d)\s*[%％]?", text, re.IGNORECASE))
     if above_5_claim:
         return value >= 4.995
-    below_5_claim = bool(re.search(r"(?:未触及|未站上|没有站上|低于|below)[^\n。；]{0,12}5\s*%", text, re.IGNORECASE))
+    below_5_claim = bool(re.search(r"(?:未触及|未站上|没有站上|低于|below)[^\n。；]{0,12}5(?!\d)\s*[%％]?", text, re.IGNORECASE))
     if below_5_claim:
         return value < 5.005
 

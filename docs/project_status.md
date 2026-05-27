@@ -721,3 +721,11 @@ Status: implemented locally; pending user review and commit.
 Scope: add a formal analyst memo provider path that defaults to DeepSeek V4 Pro. Deterministic local scripts still generate market data checks, daily reports, and `llm_context_pack`; DeepSeek reads the generated context package and returns analyst memo text with validator flags and human-review metadata.
 
 Boundaries: local qwen is retained as legacy/offline fallback only and is not silently used when DeepSeek fails. This stage does not modify qwen prompt, qwen guardrails, qwen fallback, `ask_local_ai.py`, `run_llm_eval.py`, portfolio policy, target allocation, DCA policy, cash reserve logic, or financial data sources. API keys remain environment-only, and generated analyst memo outputs are not committed.
+
+### Stage 7.4a: Analyst memo metadata and validator residual fixes
+
+Status: implemented locally; pending user review and commit.
+
+Scope: refresh holdings age dynamically from report/context generation time, close the DGS 5 percent validator residual, display boolean fields as boolean text in Markdown, and update README status to the DeepSeek-first analyst memo path.
+
+Boundaries: this stage does not modify qwen prompt, qwen fallback, qwen guardrails, `ask_local_ai.py`, `run_llm_eval.py`, portfolio policy, target allocation, DCA policy, cash reserve logic, or financial data sources. It does not add FedWatch, valuation, market breadth, or new provider integrations.
