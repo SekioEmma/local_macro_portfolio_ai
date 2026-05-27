@@ -13,6 +13,7 @@ EXTERNAL_SOURCES = [
     "Goldman",
     "Wind",
 ]
+PAUSE_DCA_PATTERN = r"(?:暂停|停止|中断)(?:长期)?定投"
 TRADE_LIKE_PATTERNS = [
     r"应(?:该)?买入",
     r"应(?:该)?卖出",
@@ -24,8 +25,6 @@ TRADE_LIKE_PATTERNS = [
     r"越跌越买",
     r"等跌再买",
     r"立即调整",
-    r"暂停定投",
-    r"停止定投",
     r"加速买入",
     r"增配(?:标普|纳指|纳斯达克|短债|债券|黄金|sp500|nasdaq|gold|bond)",
     r"减配(?:标普|纳指|纳斯达克|短债|债券|黄金|sp500|nasdaq|gold|bond)",
@@ -35,13 +34,16 @@ TRADE_NEGATION_MARKERS = [
     "不建议",
     "不能",
     "不应",
+    "不构成",
     "不是",
     "无法",
     "不要",
     "并非",
     "不把",
     "不宜",
+    "不属于",
     "不能据此",
+    "无法得出",
 ]
 THINKING_PATTERNS = [r"<think>", r"</think>", r"Thinking", r"思考过程"]
 BROADER_BOUNDARY_MARKERS = [
@@ -56,6 +58,9 @@ BROADER_BOUNDARY_MARKERS = [
     "缺少",
     "缺失",
     "没有",
+    "无法",
+    "无法获取",
+    "无法引用",
     "无法确认",
     "不能确认",
     "不能判断",
@@ -141,6 +146,8 @@ def _unsupported_market_data_claims(text: str, facts: dict[str, Any]) -> list[st
         window = _surrounding_text(text, hit, 20)
         if _has_boundary_marker(window):
             continue
+        if _is_observation_date_reference(window):
+            continue
         if _provided_market_data_claim(window, facts):
             continue
         filtered.append(hit)
@@ -151,14 +158,40 @@ def _provided_market_data_claim(text: str, facts: dict[str, Any]) -> bool:
     terms = facts.get("provided_market_data_terms")
     if not isinstance(terms, list):
         return False
-    return any(
+    if any(
         str(term).strip() and re.search(re.escape(str(term)), text, re.IGNORECASE)
         for term in terms
+    ):
+        return True
+
+    normalized_text = re.sub(r"\s+", "", text)
+    normalized_terms = {re.sub(r"\s+", "", str(term)).lower() for term in terms}
+    has_yield_curve_context = bool(
+        normalized_terms.intersection({"yield_curve_10y2y", "10y-2y", "10年-2年", "收益率曲线"})
     )
+    if has_yield_curve_context and re.search(
+        r"(?:10年(?:与|和|-)?2年|10年期(?:与|和|-)?2年期|10Y(?:-|–)?2Y|收益率曲线|(?:美债|国债)利差)",
+        normalized_text,
+        re.IGNORECASE,
+    ):
+        return True
+    return False
+
+
+def _is_observation_date_reference(text: str) -> bool:
+    if not re.search(r"观测值|观察日期|observation_date|取自|截至", text, re.IGNORECASE):
+        return False
+    return bool(re.search(r"20\d{2}[-‑–/年]\d{1,2}", text))
 
 
 def _trade_like_instruction(text: str) -> bool:
     for sentence in _sentences(text):
+        if re.search(PAUSE_DCA_PATTERN, sentence):
+            if _is_negated_trade_sentence(sentence):
+                continue
+            if _is_pause_dca_directive(sentence):
+                return True
+            continue
         if not _has_any_regex(sentence, TRADE_LIKE_PATTERNS):
             continue
         if _is_negated_trade_sentence(sentence):
@@ -201,7 +234,7 @@ def _portfolio_direction_conflicts(text: str, facts: dict[str, Any]) -> list[dic
         "short_bond": ["short_bond", "短债", "短期债", "short bond"],
         "gold": ["gold", "黄金"],
     }
-    high_terms = r"高配|overweight|高于目标|相对目标偏高|偏高"
+    high_terms = r"高配|超配|overweight|高于目标|相对目标偏高|偏高"
     low_terms = r"低配|underweight|低于目标|相对目标偏低|偏低"
     conflicts = []
     for asset, expected in direction.items():
@@ -213,8 +246,13 @@ def _portfolio_direction_conflicts(text: str, facts: dict[str, Any]) -> list[dic
             if any(re.search(re.escape(label), clause, re.IGNORECASE) for label in labels)
         ]
         for clause in asset_clauses:
-            has_high = bool(re.search(high_terms, clause, re.IGNORECASE))
-            has_low = bool(re.search(low_terms, clause, re.IGNORECASE))
+            specific = _asset_specific_direction(clause, labels, high_terms, low_terms)
+            has_high = specific == "overweight" or (
+                specific is None and bool(re.search(high_terms, clause, re.IGNORECASE))
+            )
+            has_low = specific == "underweight" or (
+                specific is None and bool(re.search(low_terms, clause, re.IGNORECASE))
+            )
             if has_high and has_low:
                 continue
             if expected_text == "underweight" and has_high:
@@ -226,14 +264,56 @@ def _portfolio_direction_conflicts(text: str, facts: dict[str, Any]) -> list[dic
     return conflicts
 
 
+def _asset_specific_direction(
+    clause: str,
+    labels: list[str],
+    high_terms: str,
+    low_terms: str,
+) -> str | None:
+    for label in labels:
+        escaped_label = re.escape(label)
+        if re.search(
+            rf"{escaped_label}[^\n。；;，,、]{{0,8}}(?:{high_terms})",
+            clause,
+            re.IGNORECASE,
+        ):
+            return "overweight"
+        if re.search(
+            rf"{escaped_label}[^\n。；;，,、]{{0,8}}(?:{low_terms})",
+            clause,
+            re.IGNORECASE,
+        ):
+            return "underweight"
+        if re.search(
+            rf"(?:{high_terms})[^\n。；;，,、]{{0,8}}{escaped_label}",
+            clause,
+            re.IGNORECASE,
+        ):
+            return "overweight"
+        if re.search(
+            rf"(?:{low_terms})[^\n。；;，,、]{{0,8}}{escaped_label}",
+            clause,
+            re.IGNORECASE,
+        ):
+            return "underweight"
+    return None
+
+
 def _missing_data_boundary_absent(text: str, facts: dict[str, Any]) -> bool:
     terms = facts.get("missing_data_terms")
     if not isinstance(terms, list):
         terms = ["PE", "forward PE", "CAPE", "估值", "FedWatch", "信用利差", "VIX", "Reuters", "FactSet", "Bloomberg"]
     relevant_sentences = []
     for sentence in _sentences(text):
-        if any(str(term) and re.search(re.escape(str(term)), sentence, re.IGNORECASE) for term in terms):
-            relevant_sentences.append(sentence)
+        matched_terms = _matched_missing_terms(sentence, terms)
+        if not matched_terms:
+            continue
+        if _only_broad_analytical_terms(matched_terms):
+            if not _broad_terms_used_as_unsupported_data(sentence):
+                continue
+            if _provided_market_data_claim(sentence, facts):
+                continue
+        relevant_sentences.append(sentence)
     if not relevant_sentences:
         return False
     if any(_has_boundary_marker(sentence) for sentence in relevant_sentences):
@@ -254,6 +334,39 @@ def _missing_data_boundary_absent(text: str, facts: dict[str, Any]) -> bool:
         if _has_any_regex(sentence, factual_assertion_patterns):
             return True
     return False
+
+
+def _matched_missing_terms(sentence: str, terms: list[Any]) -> list[str]:
+    return [
+        str(term)
+        for term in terms
+        if str(term) and re.search(re.escape(str(term)), sentence, re.IGNORECASE)
+    ]
+
+
+def _only_broad_analytical_terms(terms: list[str]) -> bool:
+    broad_terms = {"估值", "收益率点位", "黄金价格"}
+    return bool(terms) and all(term in broad_terms for term in terms)
+
+
+def _broad_terms_used_as_unsupported_data(sentence: str) -> bool:
+    return bool(
+        re.search(
+            r"估值[^\n。；]{0,16}(?:历史)?(?:高位|低位|分位|百分位|倍数|水平)",
+            sentence,
+            re.IGNORECASE,
+        )
+        or re.search(
+            r"估值[^\n。；]{0,8}(?:为|是|达到)\s*\d",
+            sentence,
+            re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:收益率点位|黄金价格)[^\n。；]{0,16}(?:为|是|报|处于|达到)\s*\d",
+            sentence,
+            re.IGNORECASE,
+        )
+    )
 
 
 def _too_template_like(text: str) -> bool:
@@ -288,6 +401,16 @@ def _has_boundary_marker(text: str) -> bool:
 def _is_negated_trade_sentence(sentence: str) -> bool:
     if "越跌越买" in sentence:
         return False
+    if re.search(rf"是否(?:应|应该|该)?[^\n。；]{{0,8}}{PAUSE_DCA_PATTERN}", sentence):
+        return True
     if any(marker in sentence for marker in TRADE_NEGATION_MARKERS):
         return True
     return bool(re.search(r"不是[^\n。；]{0,20}(?:交易|操作|指令|建议)", sentence))
+
+
+def _is_pause_dca_directive(sentence: str) -> bool:
+    directive_pattern = rf"(?:应|应该|该|建议|需要|需|必须|最好|可以考虑|考虑)[^\n。；]{{0,10}}{PAUSE_DCA_PATTERN}"
+    if re.search(directive_pattern, sentence):
+        return True
+    stripped = re.sub(r"[\s，,。；;！!？?]+", "", sentence)
+    return bool(re.fullmatch(PAUSE_DCA_PATTERN, stripped))

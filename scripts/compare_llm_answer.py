@@ -453,6 +453,7 @@ def _render_markdown(report: dict[str, Any]) -> str:
                     f"- latency_seconds: {provider_result.get('latency_seconds')}",
                     f"- estimated_cost_cny: {provider_result.get('estimated_cost_cny')}",
                     f"- usage: `{json.dumps(provider_result.get('usage'), ensure_ascii=False)}`",
+                    f"- metadata: `{json.dumps(provider_result.get('metadata'), ensure_ascii=False)}`",
                     f"- error: {provider_result.get('raw_error') or ''}",
                     f"- validator_flags: `{json.dumps(provider_result.get('validator_flags'), ensure_ascii=False)}`",
                     "",

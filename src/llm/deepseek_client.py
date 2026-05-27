@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import http.client
 import os
 import time
 import urllib.error
@@ -22,8 +23,15 @@ def call_deepseek_chat(
     temperature: float = 0.2,
     max_output_tokens: int = 4096,
     pricing: dict[str, Any] | None = None,
+    max_retries: int = 2,
 ) -> ProviderResponse:
     api_key = os.environ.get("DEEPSEEK_API_KEY")
+    metadata_base = {
+        "base_url": _redact_url(base_url),
+        "pricing_assumption": _pricing_assumption(model, pricing),
+        "retry_count": 0,
+        "attempts": [],
+    }
     if not api_key:
         return ProviderResponse(
             provider="deepseek",
@@ -32,7 +40,7 @@ def call_deepseek_chat(
             usage=empty_usage(),
             success=False,
             raw_error="Missing DEEPSEEK_API_KEY environment variable.",
-            metadata={"base_url": _redact_url(base_url), "pricing_assumption": _pricing_assumption(model, pricing)},
+            metadata=metadata_base,
         )
 
     endpoint = _join_url(base_url, "/chat/completions")
@@ -43,24 +51,75 @@ def call_deepseek_chat(
         "max_tokens": max_output_tokens,
     }
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    request = urllib.request.Request(
-        endpoint,
-        data=body,
-        method="POST",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-    )
 
     started = time.perf_counter()
-    try:
-        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
-            response_body = response.read().decode("utf-8", errors="replace")
-            parsed = json.loads(response_body)
-    except urllib.error.HTTPError as exc:
+    attempts: list[dict[str, Any]] = []
+    parsed: dict[str, Any] | None = None
+    final_error: str | None = None
+    total_attempts = max(1, int(max_retries) + 1)
+
+    for attempt_number in range(1, total_attempts + 1):
+        try:
+            request = urllib.request.Request(
+                endpoint,
+                data=body,
+                method="POST",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+            )
+            with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+                response_body = response.read().decode("utf-8", errors="replace")
+                parsed = json.loads(response_body)
+            attempts.append({"attempt": attempt_number, "status": "ok", "retryable": False})
+            break
+        except urllib.error.HTTPError as exc:
+            error_body = exc.read().decode("utf-8", errors="replace")
+            final_error = f"HTTP {exc.code}: {_sanitize_error(error_body)}"
+            retryable = _is_retryable_http_status(exc.code)
+            attempts.append(
+                {
+                    "attempt": attempt_number,
+                    "status": "error",
+                    "error_type": "HTTPError",
+                    "http_status": exc.code,
+                    "retryable": retryable,
+                }
+            )
+            if not retryable or attempt_number >= total_attempts:
+                break
+            _sleep_before_retry(attempt_number)
+        except (urllib.error.URLError, http.client.RemoteDisconnected, TimeoutError) as exc:
+            final_error = f"{type(exc).__name__}: {_sanitize_error(str(exc))}"
+            attempts.append(
+                {
+                    "attempt": attempt_number,
+                    "status": "error",
+                    "error_type": type(exc).__name__,
+                    "retryable": True,
+                }
+            )
+            if attempt_number >= total_attempts:
+                break
+            _sleep_before_retry(attempt_number)
+        except json.JSONDecodeError as exc:
+            final_error = f"Invalid JSON response: {exc}"
+            attempts.append(
+                {
+                    "attempt": attempt_number,
+                    "status": "error",
+                    "error_type": "JSONDecodeError",
+                    "retryable": False,
+                }
+            )
+            break
+
+    metadata_base["attempts"] = attempts
+    metadata_base["retry_count"] = max(0, len(attempts) - 1)
+
+    if parsed is None:
         latency = time.perf_counter() - started
-        error_body = exc.read().decode("utf-8", errors="replace")
         return ProviderResponse(
             provider="deepseek",
             model=model,
@@ -68,32 +127,8 @@ def call_deepseek_chat(
             latency_seconds=round(latency, 3),
             usage=empty_usage(),
             success=False,
-            raw_error=f"HTTP {exc.code}: {_sanitize_error(error_body)}",
-            metadata={"base_url": _redact_url(base_url), "pricing_assumption": _pricing_assumption(model, pricing)},
-        )
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        latency = time.perf_counter() - started
-        return ProviderResponse(
-            provider="deepseek",
-            model=model,
-            answer_text="",
-            latency_seconds=round(latency, 3),
-            usage=empty_usage(),
-            success=False,
-            raw_error=f"{type(exc).__name__}: {_sanitize_error(str(exc))}",
-            metadata={"base_url": _redact_url(base_url), "pricing_assumption": _pricing_assumption(model, pricing)},
-        )
-    except json.JSONDecodeError as exc:
-        latency = time.perf_counter() - started
-        return ProviderResponse(
-            provider="deepseek",
-            model=model,
-            answer_text="",
-            latency_seconds=round(latency, 3),
-            usage=empty_usage(),
-            success=False,
-            raw_error=f"Invalid JSON response: {exc}",
-            metadata={"base_url": _redact_url(base_url), "pricing_assumption": _pricing_assumption(model, pricing)},
+            raw_error=final_error or "DeepSeek request failed.",
+            metadata=metadata_base,
         )
 
     latency = time.perf_counter() - started
@@ -110,8 +145,7 @@ def call_deepseek_chat(
         success=bool(answer_text),
         raw_error=None if answer_text else "Response did not contain assistant content.",
         metadata={
-            "base_url": _redact_url(base_url),
-            "pricing_assumption": _pricing_assumption(model, pricing),
+            **metadata_base,
             "response_id": parsed.get("id"),
         },
     )
@@ -195,6 +229,14 @@ def _join_url(base_url: str, suffix: str) -> str:
 def _redact_url(base_url: str) -> str:
     api_key = os.environ.get("DEEPSEEK_API_KEY")
     return base_url.replace(api_key, "[redacted]") if api_key else base_url
+
+
+def _is_retryable_http_status(status_code: int) -> bool:
+    return status_code == 429 or 500 <= status_code <= 599
+
+
+def _sleep_before_retry(attempt_number: int) -> None:
+    time.sleep(min(2, max(1, attempt_number)))
 
 
 def _sanitize_error(text: str) -> str:
