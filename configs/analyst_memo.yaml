@@ -1,0 +1,20 @@
+analyst_memo:
+  default_provider: deepseek-pro
+  fallback_provider: qwen-local
+  context_mode: sanitized
+  output_dir: outputs/analyst_memos
+  save_markdown: true
+  save_json: true
+  require_human_review: true
+  allow_trade_instructions: false
+  prompt_preview_chars: 1200
+  deepseek:
+    model: deepseek-v4-pro
+    api_key_env: DEEPSEEK_API_KEY
+    temperature: 0.2
+    max_tokens: 2500
+    timeout_seconds: 180
+  fallback:
+    enabled: true
+    mode: offline_only
+    note: "Local qwen is retained as offline fallback, not the default analyst memo provider."

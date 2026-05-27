@@ -13,6 +13,8 @@ outputs/eval/*
 !outputs/eval/.gitkeep
 outputs/model_eval/*
 !outputs/model_eval/.gitkeep
+outputs/analyst_memos/*
+!outputs/analyst_memos/.gitkeep
 outputs/reports/*.json
 outputs/reports/*.md
 outputs/reports/latest_llm_prompt.md

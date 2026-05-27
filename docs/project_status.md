@@ -713,3 +713,11 @@ Scope: expand the DeepSeek Pro market data package with FRED-configured nominal 
 Boundaries: this stage does not modify qwen evaluation, qwen guardrails, qwen fallback, ask_local_ai.py, run_llm_eval.py, portfolio policy, target allocation, DCA policy, or cash reserve logic. It does not add FedWatch, forward PE, FactSet, Bloomberg, Reuters, paid data, or webpage scraping.
 
 Note: `market_data_package` is currently consumed only by the DeepSeek profile. The qwen `prompt_builder.py` path does not read it; any future qwen use should separately evaluate context length and hallucination risk.
+
+### Stage 7.4-DS: Default analyst memo provider
+
+Status: implemented locally; pending user review and commit.
+
+Scope: add a formal analyst memo provider path that defaults to DeepSeek V4 Pro. Deterministic local scripts still generate market data checks, daily reports, and `llm_context_pack`; DeepSeek reads the generated context package and returns analyst memo text with validator flags and human-review metadata.
+
+Boundaries: local qwen is retained as legacy/offline fallback only and is not silently used when DeepSeek fails. This stage does not modify qwen prompt, qwen guardrails, qwen fallback, `ask_local_ai.py`, `run_llm_eval.py`, portfolio policy, target allocation, DCA policy, cash reserve logic, or financial data sources. API keys remain environment-only, and generated analyst memo outputs are not committed.

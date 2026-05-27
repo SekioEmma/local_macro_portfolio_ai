@@ -71,6 +71,8 @@ def build_deepseek_prompt_package(
             "在 analyst_memo 正文前，先输出一个简短的“数据证据表”。",
             "数据证据表必须包含列：指标、数值、单位、observation_date、source、freshness/status、用途/解释。",
             "数据证据表只列本题实际使用的关键数据，不要机械列出所有字段；如果某项数据 stale，必须在表格或 data limitations 中标注，不得写成实时当前值。",
+            "数据证据表中的数值、单位、observation_date 和 source 必须从 data_package 或 portfolio_facts 原样引用；如果不确定，不要列该数值。",
+            "除非用户明确询问现货价格，不要在证据表中列黄金现货价格；讨论黄金时优先使用实际利率、通胀预期、美元/流动性机制和当前 gold 相对目标偏离。",
             "先给核心结论。",
             "然后给推理链条。",
             "必要时分情景。",
